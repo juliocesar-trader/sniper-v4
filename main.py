@@ -305,4 +305,3 @@ hilo_trading.start()
 if __name__ == '__main__':
     puerto = int(os.environ.get("PORT", 10000))
     app.run(host='0.0.0.0', port=puerto)
-Fix threading 
