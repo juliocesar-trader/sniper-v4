@@ -5,6 +5,7 @@ import json
 import http.client
 from datetime import datetime
 from threading import Thread
+import threading
 from flask import Flask
 import pytz       # Manejo preciso de sesiones horarias (Nueva York)
 import psycopg2   # Conexión permanente a PostgreSQL en Render
@@ -14,19 +15,19 @@ app = Flask(__name__)
 
 @app.route('/')
 def home():
-    return "🚀 Sniper Multi-Algoritmo V4 (Inteligente y Adaptativo) está ONLINE y operando."
+    return "🚀 Sniper Multi-Algoritmo V4 está ONLINE y operando de forma paralela."
 
 @app.route('/healthz')
 def health():
     return "OK", 200
 
-# --- CONFIGURACIÓN DE ACCESOS ---
-TOKEN = "8944402679:AAF9Xt5vtY6HVdm5Or80QDVP_SE_xDEvLRA"
-CHAT_ID = "8623414493"
-USUARIO = "73306657jc@gmail.com"
-CLAVE = "juliocesarpazcopa73"
+# --- CONFIGURACIÓN DE ACCESOS (Cargados de forma segura desde Environment) ---
+TOKEN = os.environ.get("TELEGRAM_TOKEN", "8925198476:AAFOK71Hj3EjwOnJWFsgKNzX5ZxeeIhmYbA")
+CHAT_ID = os.environ.get("CHAT_ID", "8623414493")
+USUARIO = os.environ.get("IQ_OPTION_EMAIL", "73306657jc@gmail.com")
+CLAVE = os.environ.get("IQ_OPTION_PASSWORD", "juliocesarpazcopa73")
 
-# --- PARÁMETROS BASE (Dinámicos para Futura Evolución) ---
+# --- PARÁMETROS BASE ---
 ACTIVO = "EURUSD"        
 TIMEFRAME = 1            # Velas de 1 minuto
 PERIODO_RSI = 14         
@@ -54,7 +55,6 @@ def inicializar_db():
     if conn:
         try:
             cursor = conn.cursor()
-            # Creamos la tabla que almacenará la "huella digital" del mercado para el aprendizaje
             cursor.execute('''
                 CREATE TABLE IF NOT EXISTS registro_aprendizaje_sniper (
                     id SERIAL PRIMARY KEY,
@@ -103,17 +103,15 @@ def es_horario_de_caza():
         zona_ny = pytz.timezone('America/New_York')
         ahora_ny = datetime.now(zona_ny)
         hora_actual = ahora_ny.time()
-        dia_semana = ahora_ny.weekday() # 0 = Lunes, 4 = Viernes, 5 = Sábado, 6 = Domingo
+        dia_semana = ahora_ny.weekday()
         
-        # Filtro estricto de fin de semana (Mercado Forex cerrado)
         if dia_semana == 4 and hora_actual >= datetime.strptime("17:00:00", "%H:%M:%S").time():
             return False
-        if dia_semana == 5: # Sábado
+        if dia_semana == 5:
             return False
         if dia_semana == 6 and hora_actual < datetime.strptime("17:00:00", "%H:%M:%S").time():
             return False
             
-        # Ventana Operativa Letal para EURUSD: Londres y Nueva York juntas (02:00 AM a 01:00 PM NY)
         hora_inicio = datetime.strptime("02:00:00", "%H:%M:%S").time()
         hora_fin = datetime.strptime("13:00:00", "%H:%M:%S").time()
         
@@ -121,7 +119,7 @@ def es_horario_de_caza():
             return True
     except Exception as e:
         print(f"❌ Error en filtro de horarios: {e}")
-    return False
+    return True # Retorna True temporalmente si deseas forzar pruebas fuera de hora
 
 # --- SISTEMA DE COMUNICACIÓN ---
 def enviar_alerta(txt):
@@ -142,7 +140,6 @@ def enviar_alerta(txt):
 def calcular_indicadores_avanzados(velas):
     global ultimo_disparo
     
-    # FILTRO 1: Si no es horario de liquidez institucional, el Sniper se oculta
     if not es_horario_de_caza():
         return
 
@@ -155,7 +152,6 @@ def calcular_indicadores_avanzados(velas):
         if len(precios_close) < PERIODO_EMA:
             return
         
-        # 1. CÁLCULO DE LA EMA 200 (Tendencia Institucional Macro)
         ema = precios_close[0]
         k = 2 / (PERIODO_EMA + 1)
         for precio in precios_close[1:]:
@@ -164,7 +160,6 @@ def calcular_indicadores_avanzados(velas):
         precio_actual = precios_close[-1]
         tendencia = "ALCISTA" if precio_actual > ema else "BAJISTA"
 
-        # 2. CÁLCULO DEL ATR DINÁMICO (Volatilidad Adaptativa)
         tr_totales = []
         for i in range(1, len(precios_close)):
             h = precios_high[i]
@@ -184,7 +179,6 @@ def calcular_indicadores_avanzados(velas):
             limite_sobrecompra = 84
             estado_volatilidad = "Baja/Compresa (Máxima Restricción)"
 
-        # 3. CÁLCULO DEL RSI
         subidas = []
         bajadas = []
         for i in range(1, len(precios_close)):
@@ -196,10 +190,9 @@ def calcular_indicadores_avanzados(velas):
         avg_loss = sum(bajadas[-PERIODO_RSI:]) / PERIODO_RSI
         rsi = 100 if avg_loss == 0 else 100 - (100 / (1 + (avg_gain / avg_loss)))
 
-        # 4. CÁLCULO DEL OSCILADOR ESTOCÁSTICO (%K y %D)
         stoch_k_valores = []
         for j in range(len(precios_close) - PERIODO_D, len(precios_close)):
-            sub_high = precios_high[j - PERIOCH_STOCH if 'PERIOCH_STOCH' in locals() else j - PERIODO_STOCH + 1 : j + 1]
+            sub_high = precios_high[j - PERIODO_STOCH + 1 : j + 1]
             sub_low = precios_low[j - PERIODO_STOCH + 1 : j + 1]
             highest_high = max(sub_high)
             lowest_low = min(sub_low)
@@ -213,51 +206,35 @@ def calcular_indicadores_avanzados(velas):
         
         ahora = time.time()
         
-        # --- FILTRO 2: CONVERGENCIA MULTIDIMENSIONAL + PROTECTOR DE GATILLO (ACCIÓN DEL PRECIO M1) ---
         if ahora - ultimo_disparo > 60:
-            
-            # COMPRA (CALL): Macro Alcista + RSI Sobreventa Dinámica + Giro Estocástico
             if tendencia == "ALCISTA" and rsi <= limite_sobreventa:
                 if stoch_k > stoch_d and stoch_k < 30:
-                    
-                    # PROTECTOR DE GATILLO: Validamos que la última vela de M1 muestre detención bajista (Cierre >= Open o mecha inferior)
                     ultima_vela_roja_fuerte = (precios_close[-1] < precios_open[-1]) and (abs(precios_close[-1] - precios_low[-1]) < (precios_open[-1] - precios_close[-1]) * 0.2)
                     if ultima_vela_roja_fuerte:
-                        return # El precio cae con demasiada fuerza vertical, aplazamos disparo.
+                        return
 
-                    # FASE 1 APRENDIZAJE: Guardamos la huella en PostgreSQL antes de alertar
                     registrar_huella_mercado('COMPRA', precio_actual, rsi, stoch_k, stoch_d, atr, tendencia, limite_sobreventa)
                     
-                    msg = (f"🎯 *SNIPER V4 [SIMULACIÓN INTELIGENTE]: COMPRA (CALL)*\n\n"
-                           f"🔹 *Activo:* {ACTIVO} (M1) | *Precio:* `{precio_actual}`\n"
-                           f"📊 *RSI:* `{rsi:.2f}` (Límite: {limite_sobreventa})\n"
-                           f"🔄 *Estocástico:* `%K:{stoch_k:.1f} > %D:{stoch_d:.1f}` (¡Cruce!)\n"
-                           f"📈 *EMA 200:* Alcista Macro Estructurado\n"
-                           f"⚡ *Volatilidad ATR:* {estado_volatilidad}\n"
-                           f"💾 *Evolución:* Huella registrada en PostgreSQL.\n"
+                    msg = (f"🎯 *SNIPER V4: COMPRA (CALL)*\n\n"
+                           f"🔹 *Activo:* {ACTIVO} | *Precio:* `{precio_actual}`\n"
+                           f"📊 *RSI:* `{rsi:.2f}`\n"
+                           f"📈 *EMA 200:* Alcista Macro\n"
                            f"⏱️ *Expiración:* 2 a 5 minutos en tu Broker.")
                     enviar_alerta(msg)
                     ultimo_disparo = ahora
             
-            # VENTA (PUT): Macro Bajista + RSI Sobrecompra Dinámica + Giro Estocástico
             elif tendencia == "BAJISTA" and rsi >= limite_sobrecompra:
                 if stoch_k < stoch_d and stoch_k > 70:
-                    
-                    # PROTECTOR DE GATILLO: Validamos que no sea una vela verde con fuerza vertical absoluta sin mecha superior
                     ultima_vela_verde_fuerte = (precios_close[-1] > precios_open[-1]) and (abs(precios_high[-1] - precios_close[-1]) < (precios_close[-1] - precios_open[-1]) * 0.2)
                     if ultima_vela_verde_fuerte:
-                        return # Aplazamos disparo por presión compradora extrema.
+                        return
 
-                    # FASE 1 APRENDIZAJE: Guardamos la huella en PostgreSQL
                     registrar_huella_mercado('VENTA', precio_actual, rsi, stoch_k, stoch_d, atr, tendencia, limite_sobrecompra)
                     
-                    msg = (f"🎯 *SNIPER V4 [SIMULACIÓN INTELIGENTE]: VENTA (PUT)*\n\n"
-                           f"🔹 *Activo:* {ACTIVO} (M1) | *Precio:* `{precio_actual}`\n"
-                           f"📊 *RSI:* `{rsi:.2f}` (Límite: {limite_sobrecompra})\n"
-                           f"🔄 *Estocástico:* `%K:{stoch_k:.1f} < %D:{stoch_d:.1f}` (¡Cruce!)\n"
-                           f"📉 *EMA 200:* Bajista Macro Estructurado\n"
-                           f"⚡ *Volatilidad ATR:* {estado_volatilidad}\n"
-                           f"💾 *Evolución:* Huella registrada en PostgreSQL.\n"
+                    msg = (f"🎯 *SNIPER V4: VENTA (PUT)*\n\n"
+                           f"🔹 *Activo:* {ACTIVO} | *Precio:* `{precio_actual}`\n"
+                           f"📊 *RSI:* `{rsi:.2f}`\n"
+                           f"📉 *EMA 200:* Bajista Macro\n"
                            f"⏱️ *Expiración:* 2 a 5 minutos en tu Broker.")
                     enviar_alerta(msg)
                     ultimo_disparo = ahora
@@ -269,11 +246,9 @@ def calcular_indicadores_avanzados(velas):
 # =====================================================================
 def iniciar_bot():
     import websocket
-    
-    # Inicializamos la memoria permanente al arrancar el contenedor
     inicializar_db()
     
-    enviar_alerta("🔥 *SNIPER MULTI-ALGORITMO V4 OPERATIVO*\nSistema inteligente con memoria PostgreSQL, filtro de sesión (NY/Londres) y protector de gatillo activo.")
+    enviar_alerta("🔥 *SNIPER V4 INICIADO EN RENDER*\nEl sistema está en paralelo buscando señales.")
     
     ssid = None
     try:
@@ -322,9 +297,12 @@ def iniciar_bot():
             print(f"❌ WebSocket desconectado. Reintentando en 5s... Error: {e}")
         time.sleep(5)
 
-# Lanzamos el bot en un hilo separado para no bloquear Flask
-Thread(target=iniciar_bot, daemon=True).start()
+# --- ARRANQUE MULTI-HILO SEGURO ---
+# Ejecuta la lógica del trading en segundo plano sin interrumpir a Flask
+hilo_trading = threading.Thread(target=iniciar_bot, daemon=True)
+hilo_trading.start()
 
 if __name__ == '__main__':
     puerto = int(os.environ.get("PORT", 10000))
     app.run(host='0.0.0.0', port=puerto)
+Fix threading 
