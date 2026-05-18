@@ -54,4 +54,5 @@ hilo_iq.daemon = True
 hilo_iq.start()
 
 print("🚀 Servidor en escucha constante...")
-bot_telegram.polling(none_stop=True, interval=1, timeout=20)
+# Escucha inteligente e infinita para evitar el Error 409 Conflict
+bot_telegram.infinity_polling(timeout=10, long_polling_timeout=5)
