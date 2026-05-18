@@ -6,11 +6,11 @@ import threading
 import telebot
 from websocket import create_connection
 
-# 1. CREDENCIALES
-IQ_USER = "73306657jc@gmail.com"
-IQ_PASS = "JulioTrader2026"
-TELEGRAM_TOKEN = "8925198476:AAFOK71Hj3Ejw0nJWFSgKNzX5ZxeeIhmYbA"
-TELEGRAM_ID = "8623414493"
+# 1. CREDENCIALES (Cargadas de forma segura desde las variables de entorno)
+IQ_USER = os.getenv("IQ_USER")
+IQ_PASS = os.getenv("IQ_PASS")
+TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
+TELEGRAM_ID = os.getenv("TELEGRAM_ID")
 
 bot_telegram = telebot.TeleBot(TELEGRAM_TOKEN, threaded=False)
 
@@ -36,12 +36,12 @@ def conectar_iq_option():
     except Exception as e:
         print(f"❌ Error de red en IQ Option: {str(e)}")
 
-# =========================================================
+# ---------------------------------------------------------------------
 # COMANDOS INTERACTIVOS
-# =========================================================
+# ---------------------------------------------------------------------
 @bot_telegram.message_handler(commands=['saldo'])
 def enviar_saldo(message):
-    texto_respuesta = "💰 Saldo de Práctica: $10,000.00 USD\n📡 Conexión activa 24/7 desde el servidor."
+    texto_respuesta = "💰 Saldo de Práctica: $10,000.00 USD\n🔌 Conexión activa 24/7 desde el servidor."
     bot_telegram.reply_to(message, texto_respuesta)
 
 # Limpieza inicial de conexiones muertas
