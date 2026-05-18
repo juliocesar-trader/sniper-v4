@@ -45,8 +45,11 @@ def enviar_saldo(message):
     bot_telegram.reply_to(message, texto_respuesta)
 
 # Limpieza inicial de conexiones muertas
-bot_telegram.remove_webhook()
-time.sleep(1)
+try:
+    bot_telegram.remove_webhook()
+except Exception:
+    pass
+time.sleep(2)
 
 # Hilo para mantener IQ Option en paralelo
 hilo_iq = threading.Thread(target=conectar_iq_option)
@@ -54,5 +57,17 @@ hilo_iq.daemon = True
 hilo_iq.start()
 
 print("🚀 Servidor en escucha constante...")
-# Escucha inteligente e infinita para evitar el Error 409 Conflict
-bot_telegram.infinity_polling(timeout=10, long_polling_timeout=5)
+
+# ---------------------------------------------------------------------
+# BUCLE ANTICRISIS PARA EL ERROR 409
+# ---------------------------------------------------------------------
+while True:
+    try:
+        bot_telegram.infinity_polling(timeout=10, long_polling_timeout=5)
+    except Exception as e:
+        if "409" in str(e):
+            print("⚠️ Conflicto de sesión detectado (409). Reintentando en 5 segundos...")
+            time.sleep(5)
+        else:
+            print(f"❌ Error inesperado en el bucle: {e}")
+            time.sleep(2)
