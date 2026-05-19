@@ -32,7 +32,6 @@ bot_telegram = telebot.TeleBot(TELEGRAM_TOKEN, threaded=False)
 iq_client = None
 
 # Base de datos en memoria para el aprendizaje y optimización del bot
-# Guarda estructura: {(divisa, hora): {"ganadas": 0, "perdidas": 0}}
 HISTORIAL_SENALES = {}
 
 # ==============================================================================
@@ -85,7 +84,6 @@ def calcular_indicadores(velas):
 # ==============================================================================
 def escanear_mercados():
     global iq_client
-    # Lista de divisas principales a escanear de manera simultánea
     divisas = ["EURUSD", "GBPUSD", "EURJPY", "AUDUSD"]
     
     print("🎯 Francotirador activado. Escaneando divisas...")
@@ -94,21 +92,17 @@ def escanear_mercados():
         if iq_client and iq_client.check_connect():
             hora_actual = time.strftime("%H:%M")
             
-            # Filtro de Noticias / Horario de alta volatilidad impredecible
-            # (Evita operar en aperturas bruscas o momentos conflictivos)
             if "12:30" <= hora_actual <= "13:30":
                 time.sleep(60)
                 continue
                 
             for divisa in divisas:
                 try:
-                    # Filtro de Payout Mínimo (Mínimo 80%)
                     payouts = iq_client.get_all_profit()
                     payout = payouts.get(divisa, {}).get("turbo", 0)
                     if payout < 80:
                         continue
                         
-                    # Obtener las últimas 110 velas de 1 minuto (60 segundos)
                     velas = iq_client.get_candles(divisa, 60, 110, time.time())
                     if not velas or len(velas) < 100:
                         continue
@@ -120,32 +114,23 @@ def escanear_mercados():
                     precio_apertura = ultima_vela['open']
                     tamaño_vela = abs(precio_cierre - precio_apertura)
                     
-                    # Filtro Inteligente: Optimización por Base de Datos de Aprendizaje
-                    clave_optimizacion = (divisa, hora_actual[:2]) # Agrupado por Hora
+                    clave_optimizacion = (divisa, hora_actual[:2])
                     estadistica = HISTORIAL_SENALES.get(clave_optimizacion, {"ganadas": 0, "perdidas": 0})
                     totales = estadistica["ganadas"] + estadistica["perdidas"]
                     
-                    # Si el registro demuestra que este par a esta hora pierde más del 50%, se bloquea
                     if totales > 4 and (estadistica["ganadas"] / totales) < 0.50:
                         continue
                     
-                    # Filtro de Vela de Fuerza (Evita entrar si la vela es anormalmente grande)
                     if tamaño_vela > (atr * 2.5):
                         continue
                         
-                    # --- COMPROBACIÓN DE DISPARO ---
                     senal = None
-                    
-                    # CONDICIÓN DE COMPRA (CALL): Tendencia alcista + Agotamiento abajo
                     if precio_cierre > ema and precio_cierre <= banda_inf and rsi < 25:
                         senal = "🟢 COMPRA (CALL) 📈"
-                        
-                    # CONDICIÓN DE VENTA (PUT): Tendencia bajista + Agotamiento arriba
                     elif precio_cierre < ema and precio_cierre >= banda_sup and rsi > 75:
                         senal = "🔴 VENTA (PUT) 📉"
                         
                     if senal:
-                        # Enviar Alerta Inmediata a Telegram
                         mensaje = (
                             f"🎯 *¡SEÑAL FRANCOTIRADOR!*\n\n"
                             f"💱 Divisa: {divisa}\n"
@@ -155,19 +140,16 @@ def escanear_mercados():
                             f"🛡️ Filtros integrados: ATR y EMA pasados con éxito."
                         )
                         bot_telegram.send_message(TELEGRAM_ID, mensaje, parse_mode="Markdown")
-                        
-                        # Iniciar hilo de simulación para registrar efectividad y aprender del resultado
                         threading.Thread(target=simular_operacion, args=(divisa, precio_cierre, senal, clave_optimizacion)).start()
                         
                 except Exception as e:
                     print(f"⚠️ Alerta menor en escaneo de {divisa}: {e}")
                     
-        time.sleep(10) # Frecuencia de escaneo preventivo rápido
+        time.sleep(10)
 
 def simular_operacion(divisa, precio_entrada, tipo_senal, clave_optimizacion):
-    """Simula el tiempo de expiración y guarda el resultado en la base de datos de aprendizaje"""
     global iq_client
-    time.sleep(62) # Espera a que termine el minuto de la operación
+    time.sleep(62)
     try:
         velas = iq_client.get_candles(divisa, 60, 1, time.time())
         precio_final = velas[-1]['close']
@@ -181,10 +163,8 @@ def simular_operacion(divisa, precio_entrada, tipo_senal, clave_optimizacion):
             
         if ganó:
             HISTORIAL_SENALES[clave_optimizacion]["ganadas"] += 1
-            print(f"🤖 Simulación Exitosa para {divisa}. Registrada como Ganada (ITM).")
         else:
             HISTORIAL_SENALES[clave_optimizacion]["perdidas"] += 1
-            print(f"🤖 Simulación Fallida para {divisa}. Registrada como Perdida (OTM).")
             
     except Exception as e:
         print(f"No se pudo completar la simulación: {e}")
@@ -200,7 +180,7 @@ def conectar_iq_option():
         status, reason = iq_client.connect()
         
         if status:
-            print("🟢 Conexión exitosa y confirmed con IQ Option.")
+            print("🟢 Conexión exitosa y confirmada con IQ Option.")
             mensaje_exito = (
                 "🤖 ¡Sniper V4 Online!\n\n"
                 "🛡️ Estrategia de Triple Confirmación y Filtro ATR Activos.\n"
@@ -208,7 +188,6 @@ def conectar_iq_option():
             )
             bot_telegram.send_message(TELEGRAM_ID, mensaje_exito)
             
-            # Lanzar el escáner de divisas de inmediato en un hilo de fondo
             hilo_escaner = threading.Thread(target=escanear_mercados)
             hilo_escaner.daemon = True
             hilo_escaner.start()
@@ -235,7 +214,7 @@ def enviar_saldo(message):
     bot_telegram.reply_to(message, respuesta)
 
 # ==============================================================================
-# 7. INICIALIZACIÓN Y ORQUESTACIÓN JERÁRQUICA (Sistema Anti-Choques Integrado)
+# 7. INICIALIZACIÓN Y ORQUESTACIÓN CON SISTEMA DE PURGA BLINDADO
 # ==============================================================================
 if __name__ == "__main__":
     print("🚀 Arrancando secuencia de inicialización Sniper V4...")
@@ -247,23 +226,23 @@ if __name__ == "__main__":
     
     time.sleep(2)
     
+    # Intento de purga inicial forzada de webhook
     try:
-        print("🧹 Purgando hilos de memoria y Webhooks duplicados...")
         bot_telegram.remove_webhook(drop_pending_updates=True)
-    except Exception as e:
-        print(f"⚠️ Nota de limpieza: {e}")
-    
-    time.sleep(2)
+    except Exception:
+        pass
     
     hilo_iq = threading.Thread(target=conectar_iq_option)
     hilo_iq.daemon = True
     hilo_iq.start()
     
-    print("⚡ Bot de Telegram listo y escuchando órdenes...")
+    print("⚡ Bot de Telegram listo y escuchando órdenes sin colisiones...")
+    
+    # Bucle de polling blindado contra errores 409
     while True:
         try:
-            # Reemplazo de infinity_polling por polling corregido para disolver errores 409
-            bot_telegram.polling(none_stop=True, interval=1, timeout=20)
+            # restart_on_change=True rompe hilos viejos duplicados instantáneamente en la API de Telegram
+            bot_telegram.polling(none_stop=True, interval=2, timeout=30, restart_on_change=True)
         except Exception as e:
-            print(f"🔄 Reiniciando polling por desconexión: {e}")
+            print(f"🔄 Limpiando colisión / Reiniciando bucle: {e}")
             time.sleep(5)
