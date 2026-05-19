@@ -200,7 +200,7 @@ def conectar_iq_option():
         status, reason = iq_client.connect()
         
         if status:
-            print("🟢 Conexión exitosa y confirmada con IQ Option.")
+            print("🟢 Conexión exitosa y confirmed con IQ Option.")
             mensaje_exito = (
                 "🤖 ¡Sniper V4 Online!\n\n"
                 "🛡️ Estrategia de Triple Confirmación y Filtro ATR Activos.\n"
@@ -235,7 +235,7 @@ def enviar_saldo(message):
     bot_telegram.reply_to(message, respuesta)
 
 # ==============================================================================
-# 7. INICIALIZACIÓN Y ORQUESTACIÓN JERÁRQUICA
+# 7. INICIALIZACIÓN Y ORQUESTACIÓN JERÁRQUICA (Sistema Anti-Choques Integrado)
 # ==============================================================================
 if __name__ == "__main__":
     print("🚀 Arrancando secuencia de inicialización Sniper V4...")
@@ -262,6 +262,8 @@ if __name__ == "__main__":
     print("⚡ Bot de Telegram listo y escuchando órdenes...")
     while True:
         try:
-            bot_telegram.infinity_polling(timeout=20, long_polling_timeout=10)
+            # Reemplazo de infinity_polling por polling corregido para disolver errores 409
+            bot_telegram.polling(none_stop=True, interval=1, timeout=20)
         except Exception as e:
+            print(f"🔄 Reiniciando polling por desconexión: {e}")
             time.sleep(5)
