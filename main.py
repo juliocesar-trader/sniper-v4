@@ -4,8 +4,9 @@ import json
 import time
 import threading
 import telebot
-from websocket import create_connection
 from flask import Flask
+# Se cambia la conexión WebSocket manual por la API oficial estable
+from iqoptionapi.stable_api import IQ_Option
 
 # ==============================================================================
 # 1. SERVIDOR WEB FLASK (Bindeo de Puerto prioritario para Render)
@@ -17,7 +18,6 @@ def home():
     return "🚀 Servidor Sniper V4 en ejecución continua y estable.", 200
 
 def ejecutar_servidor_web():
-    # Render inyecta la variable dinámica PORT de manera automática
     puerto = int(os.environ.get("PORT", 10000))
     app.run(host="0.0.0.0", port=puerto)
 
@@ -31,28 +31,32 @@ TELEGRAM_ID = os.getenv("TELEGRAM_ID")
 
 bot_telegram = telebot.TeleBot(TELEGRAM_TOKEN, threaded=False)
 
+# Variable global para almacenar el cliente de conexión del Broker
+iq_client = None
+
 # ==============================================================================
 # 3. PROCESO DE FONDO: CONEXIÓN INTEGRAL A IQ OPTION
 # ==============================================================================
 def conectar_iq_option():
+    global iq_client
     try:
-        print("💡 Estableciendo canal WebSocket con IQ Option...")
-        ws = create_connection("wss://iqoption.com/echo/websocket")
+        print("💡 Conectando de forma oficial a IQ Option...")
+        # Inicializa la API con tus credenciales seguras
+        iq_client = IQ_Option(IQ_USER, IQ_PASS)
+        status, reason = iq_client.connect()
         
-        auth_data = {
-            "name": "ssid",
-            "msg": f"{IQ_USER}[SPLIT]{IQ_PASS}"
-        }
-        ws.send(json.dumps(auth_data))
-        print("🟢 Petición de autenticación enviada correctamente.")
-        
-        mensaje_exito = (
-            "🤖 ¡Sniper V4 Actualizado con Éxito!\n\n"
-            "🛡️ Errores 409 y Port Timeout mitigados.\n"
-            "💎 Envía /saldo para validar la respuesta activa."
-        )
-        bot_telegram.send_message(TELEGRAM_ID, mensaje_exito)
-        
+        if status:
+            print("🟢 Conexión exitosa y confirmada con IQ Option.")
+            mensaje_exito = (
+                "🤖 ¡Sniper V4 Actualizado con Éxito!\n\n"
+                "🛡️ Errores 409 mitigados y Conexión Real Establecida.\n"
+                "💎 Envía /saldo para validar tu saldo en tiempo real."
+            )
+            bot_telegram.send_message(TELEGRAM_ID, mensaje_exito)
+        else:
+            print(f"❌ Falló la autenticación en el broker: {reason}")
+            bot_telegram.send_message(TELEGRAM_ID, f"❌ Error de inicio de sesión en IQ Option: {reason}")
+            
     except Exception as e:
         print(f"❌ Error crítico en infraestructura de IQ Option: {str(e)}")
 
@@ -61,7 +65,19 @@ def conectar_iq_option():
 # ==============================================================================
 @bot_telegram.message_handler(commands=['saldo'])
 def enviar_saldo(message):
-    respuesta = "💰 Saldo de Práctica: $10,000.00 USD\n🔒 Canal seguro 24/7 sin suspensiones."
+    global iq_client
+    
+    # Comprobar si la sesión de IQ Option está activa y no se ha caído
+    if iq_client and iq_client.check_connect():
+        try:
+            # Obtiene el saldo real actual directamente desde los servidores de IQ Option
+            saldo_real_broker = iq_client.get_balance()
+            respuesta = f"💰 Saldo de Práctica Real: ${saldo_real_broker:,.2f} USD\n🔒 Canal seguro 24/7 sin suspensiones."
+        except Exception as error_saldo:
+            respuesta = f"⚠️ Conectado, pero no se pudo leer el saldo: {str(error_saldo)}"
+    else:
+        respuesta = "❌ El bot no está conectado a IQ Option en este momento o las credenciales fallaron."
+        
     bot_telegram.reply_to(message, respuesta)
 
 # ==============================================================================
@@ -76,10 +92,9 @@ if __name__ == "__main__":
     hilo_web.start()
     print("🌐 Servidor Web levantado de manera prioritaria.")
     
-    # Latencia técnica preventiva de estabilización
     time.sleep(2)
     
-    # PASO 2: Forzar limpieza de Webhooks y purgar peticiones colgadas (Solución definitiva al Error 409)
+    # PASO 2: Forzar limpieza de Webhooks y purgar peticiones colgadas
     try:
         print("🧹 Purgando hilos de memoria y Webhooks duplicados...")
         bot_telegram.remove_webhook(drop_pending_updates=True)
@@ -95,7 +110,7 @@ if __name__ == "__main__":
     hilo_iq.start()
     print("📈 Hilo asíncrono de IQ Option desplegado.")
     
-    # PASO 4: Iniciar Polling de Telegram infinito con manejo de excepciones tolerante a fallos
+    # PASO 4: Iniciar Polling de Telegram infinito
     print("⚡ Bot de Telegram listo y escuchando órdenes...")
     while True:
         try:
