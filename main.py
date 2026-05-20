@@ -8,7 +8,7 @@ from flask import Flask
 from credenciales import bot_telegram, conectar_broker, TELEGRAM_ID
 
 # ==============================================================================
-# CONFIGURACIÓN DE BASE DE DATOS PERSISTENTE PARA LA IA
+# BASE DE DATOS PERSISTENTE PARA LA EVOLUCIÓN DE LA IA
 # ==============================================================================
 ARCHIVO_HISTORIAL = "historial_operaciones.csv"
 
@@ -22,7 +22,7 @@ if not os.path.exists(ARCHIVO_HISTORIAL):
         ])
 
 # ==============================================================================
-# SERVIDOR WEB FLASK (PROVEEDOR DE LINEA DE VIDA PARA RENDER)
+# SERVIDOR WEB FLASK (SOPORTE PARA RENDER)
 # ==============================================================================
 app = Flask(__name__)
 iq_client = None  
@@ -31,119 +31,167 @@ iq_client = None
 def home():
     global iq_client
     if iq_client and iq_client.check_connect():
-        estado = "🟢 PUENTE OPERANDO - CONECTADO A IQ OPTION"
+        estado = "🟢 IA EVOLUTIVA - GENERANDO HISTORIAL DE APRENDIZAJE"
         try: saldo = f"${iq_client.get_balance():,.2f} USD"
         except: saldo = "Cargando..."
     else:
-        estado = "❌ PUENTE CAÍDO O DESCONECTADO"
+        estado = "❌ PUENTE DESCONECTADO"
         saldo = "$0.00"
     
-    return f"<h2>🚀 Sniper V4 Modularizado</h2><p><b>Estado:</b> {estado}</p><p><b>Saldo:</b> {saldo}</p>", 200
+    return f"<h2>🧠 Sniper V4 - Modo Aprendizaje IA</h2><p><b>Estado:</b> {estado}</p><p><b>Saldo:</b> {saldo}</p>", 200
 
 def ejecutar_servidor_web():
     puerto = int(os.environ.get("PORT", 10000))
-    print(f"📡 Iniciando servidor Web de soporte en puerto {puerto}...")
     app.run(host="0.0.0.0", port=puerto, debug=False, use_reloader=False)
 
 # ==============================================================================
-# ESCÁNER DIRECTO DE MUESTRA (TEST FORZADO)
+# MATEMÁTICAS DE MERCADO (INDICADORES BASE PARA LA IA)
+# ==============================================================================
+def calcular_indicadores(velas):
+    if len(velas) < 20:
+        return 0, 0, 0, 50, 0
+    cierres = [v['close'] for v in velas]
+    altos = [v['max'] for v in velas]
+    bajos = [v['min'] for v in velas]
+    
+    k = 2 / (14 + 1)
+    ema = cierres[0]
+    for c in cierres[1:]: ema = (c * k) + (ema * (1 - k))
+        
+    ultimas_20 = cierres[-20:]
+    sma_20 = sum(ultimas_20) / 20
+    varianza = sum((x - sma_20) ** 2 for x in ultimas_20) / 20
+    desviacion = varianza ** 0.5
+    
+    ganancias, perdidas = 0, 0
+    for i in range(len(cierres)-14, len(cierres)):
+        cambio = cierres[i] - cierres[i-1]
+        if cambio > 0: ganancias += cambio
+        else: perdidas += abs(cambio)
+    rs = (ganancias / 14) / ((perdidas / 14) + 1e-10)
+    rsi = 100 - (100 / (1 + rs))
+    
+    tr_tot = 0
+    for i in range(len(velas)-14, len(velas)):
+        tr_tot += max(altos[i] - bajos[i], abs(altos[i] - cierres[i-1]), abs(bajos[i] - cierres[i-1]))
+        
+    return ema, sma_20 + (2 * desviacion), sma_20 - (2 * desviacion), rsi, tr_tot / 14
+
+# ==============================================================================
+# ESCÁNER DE ALIMENTACIÓN: RECOLECCIÓN AMPLIA PARA GENERAR DATOS
 # ==============================================================================
 def escanear_mercados():
     global iq_client
-    print("🎯 MODO TEST ACTIVADO: Forzando señales cada 30 segundos...")
+    divisas = ["EURUSD", "GBPUSD", "EURJPY", "AUDUSD"]
+    print("🧠 Modo Inteligencia Autónoma Activo: Recolectando escenarios...")
     
-    # Intentamos enviar una alerta inicial de confirmación directo al arrancar
     try:
-        bot_telegram.send_message(TELEGRAM_ID, "🚀 *Sistema de Alertas Forzadas Inicializado con Éxito*", parse_mode="Markdown")
-    except Exception as e:
-        print(f"❌ Error crítico enviando mensaje de arranque inicial: {e}")
+        bot_telegram.send_message(TELEGRAM_ID, "🤖 *Modo Evolutivo Activado*\nEl bot está analizando escenarios abiertos para construir su propia estrategia matemática.", parse_mode="Markdown")
+    except:
+        pass
 
     while True:
-        try:
-            divisa = "EURUSD"
-            precio_cierre = 1.08500
-            rsi, atr, banda_sup, banda_inf = 50.0, 0.00012, 1.08600, 1.08400
-            senal = "🟢 COMPRA (TEST DE CONEXIÓN) 📈"
-            
-            mensaje = f"🧪 *TEST FRANCOTIRADOR*\n\n💱 Divisa: {divisa}\n⚡ Operación: {senal}\n⏱️ Expiración: 1 Minuto"
-            bot_telegram.send_message(TELEGRAM_ID, mensaje, parse_mode="Markdown")
-            print("📬 Señal de prueba enviada a Telegram.")
-            
-            # Registrar simulación de forma asíncrona
-            threading.Thread(
-                target=simular_operacion, 
-                args=(divisa, precio_cierre, senal, rsi, atr, banda_sup, banda_inf),
-                daemon=True
-            ).start()
-            
-        except Exception as e:
-            print(f"⚠️ Error en bucle de escáner: {e}")
-            
-        time.sleep(30)
+        if iq_client and iq_client.check_connect():
+            for divisa in divisas:
+                try:
+                    velas = iq_client.get_candles(divisa, 60, 30, time.time())
+                    if not velas: continue
+                    
+                    ema, b_sup, b_inf, rsi, atr = calcular_indicadores(velas)
+                    precio_cierre = velas[-1]['close']
+                    
+                    # Filtros dinámicos amplios (Dan libertad a que la IA vea qué pasa en los extremos)
+                    senal = None
+                    if rsi > 65 or precio_cierre >= b_sup:
+                        senal = "🔴 VENTA (ESCENARIO IA) 📉"
+                    elif rsi < 35 or precio_cierre <= b_inf:
+                        senal = "🟢 COMPRA (ESCENARIO IA) 📈"
+                    
+                    if senal:
+                        # Mandar alerta corta a Telegram para no saturarte
+                        mensaje = f"🧠 *ESCENARIO DETECTADO ({divisa})*\n⚡ Tipo: {senal}\n📊 RSI: {round(rsi,1)} | ATR: {round(atr,6)}"
+                        bot_telegram.send_message(TELEGRAM_ID, mensaje, parse_mode="Markdown")
+                        
+                        # Disparar simulación y registro de aprendizaje en el CSV
+                        threading.Thread(
+                            target=simular_operacion, 
+                            args=(divisa, precio_cierre, senal, rsi, atr, b_sup, b_inf),
+                            daemon=True
+                        ).start()
+                        
+                except Exception as e:
+                    print(f"Error analizando {divisa}: {e}")
+                time.sleep(2)
+        else:
+            print("🔌 Esperando conexión del broker...")
+        time.sleep(15)
 
 def simular_operacion(divisa, precio_entrada, tipo_senal, rsi, atr, banda_sup, banda_inf):
-    time.sleep(5)
+    global iq_client
+    time.sleep(61) # Esperamos a que la vela cierre para verificar efectividad
     try:
-        hora_registro = time.strftime("%H:%M:%S")
-        timestamp = int(time.time())
-        with open(ARCHIVO_HISTORIAL, mode="a", newline="") as f:
-            escritor = csv.writer(f)
-            escritor.writerow([
-                timestamp, divisa, hora_registro, "COMPRA",
-                precio_entrada, precio_entrada + 0.00002, 1,
-                round(rsi, 2), round(atr, 6), round(banda_sup, 6), round(banda_inf, 6)
-            ])
-        print("💾 Datos del test guardados en el historial CSV.")
+        if iq_client and iq_client.check_connect():
+            velas = iq_client.get_candles(divisa, 60, 1, time.time())
+            if not velas: return
+            
+            precio_final = velas[-1]['close']
+            hora_registro = time.strftime("%H:%M:%S")
+            timestamp = int(time.time())
+            
+            # Evaluar si el escenario fue exitoso o no
+            ganó = False
+            if "COMPRA" in tipo_senal and precio_final > precio_entrada: ganó = True
+            elif "VENTA" in tipo_senal and precio_final < precio_entrada: ganó = True
+            
+            resultado = 1 if ganó else 0
+            tipo_limpio = "COMPRA" if "COMPRA" in tipo_senal else "VENTA"
+            
+            # Guardamos los datos puros en el CSV persistente
+            with open(ARCHIVO_HISTORIAL, mode="a", newline="") as f:
+                escritor = csv.writer(f)
+                escritor.writerow([
+                    timestamp, divisa, hora_registro, tipo_limpio,
+                    precio_entrada, precio_final, resultado,
+                    round(rsi, 2), round(atr, 6), round(banda_sup, 6), round(banda_inf, 6)
+                ])
     except Exception as e:
-        print(f"Error registrando simulación: {e}")
+        print(f"Error en registro evolutivo: {e}")
 
 # ==============================================================================
-# MANEJADOR DE COMANDOS (BOT DE TELEGRAM)
+# ESCUCHA DE COMANDOS
 # ==============================================================================
 @bot_telegram.message_handler(commands=['saldo'])
 def enviar_saldo(message):
     global iq_client
-    print(f"📥 Comando /saldo recibido de {message.chat.id}")
     if iq_client and iq_client.check_connect():
         try:
             bot_telegram.reply_to(message, f"💰 Saldo de Práctica Real: ${iq_client.get_balance():,.2f} USD")
         except Exception as e:
             bot_telegram.reply_to(message, f"⚠️ Error leyendo saldo: {e}")
     else:
-        bot_telegram.reply_to(message, "❌ Puente desconectado temporalmente del broker.")
+        bot_telegram.reply_to(message, "❌ Puente desconectado del broker.")
 
 # ==============================================================================
-# FLUJO DE ARRANQUE SECUENCIAL REESTRUCTURADO
+# ARRANQUE
 # ==============================================================================
 if __name__ == "__main__":
-    print("⚡ Iniciando orquestación secuencial Sniper V4...")
-    
-    # 1. Eliminar cualquier Webhook colgado de configuraciones previas
     try: 
         bot_telegram.remove_webhook(drop_pending_updates=True)
         time.sleep(1)
-    except Exception as e: 
-        print(f"Aviso de Webhook: {e}")
+    except: 
+        pass
 
-    # 2. Conectar al broker de inmediato en el hilo principal
     print("🔌 Conectando con IQ Option...")
     iq_client = conectar_broker()
 
-    # 3. Lanzar el Servidor Web (Flask) en un hilo secundario aislado
-    t_web = threading.Thread(target=ejecutar_servidor_web, daemon=True)
-    t_web.start()
+    threading.Thread(target=ejecutar_servidor_web, daemon=True).start()
     time.sleep(2)
 
-    # 4. Lanzar el escáner de mercados forzado en otro hilo secundario aislado
-    t_escaner = threading.Thread(target=escanear_mercados, daemon=True)
-    t_escaner.start()
+    threading.Thread(target=escanear_mercados, daemon=True).start()
 
-    # 5. ANCLAR EL HILO PRINCIPAL AL POLLING DE TELEGRAM
-    # Esto obliga a Render a mantener todo el script vivo y despierto
-    print("🚀 Servidores acoplados. Activando escucha continua de Telegram (Polling)...")
+    print("🚀 Servidores acoplados. Activando Polling de Telegram...")
     while True:
         try:
             bot_telegram.polling(none_stop=True, skip_pending_updates=True, timeout=20, long_polling_timeout=10)
         except Exception as e:
-            print(f"🔄 Reiniciando Polling de Telegram de forma automática por desconexión: {e}")
             time.sleep(5)
