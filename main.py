@@ -1,10 +1,26 @@
 import os
 import time
 import threading
+import csv
 from flask import Flask
 
 # IMPORTACIÓN DEL PUENTE SEGÚN TU NUEVO ESTÁNDAR
 from credenciales import bot_telegram, conectar_broker, TELEGRAM_ID
+
+# ==============================================================================
+# CONFIGURACIÓN DE BASE DE DATOS PERSISTENTE PARA LA IA
+# ==============================================================================
+ARCHIVO_HISTORIAL = "historial_operaciones.csv"
+
+# Si el archivo no existe en el servidor de Render, se inicializan las columnas
+if not os.path.exists(ARCHIVO_HISTORIAL):
+    with open(ARCHIVO_HISTORIAL, "w", newline="") as f:
+        escritor = csv.writer(f)
+        escritor.writerow([
+            "timestamp", "divisa", "hora", "tipo_senal", 
+            "precio_entrada", "precio_final", "resultado", 
+            "rsi", "atr", "banda_sup", "banda_inf"
+        ])
 
 # ==============================================================================
 # SERVIDOR WEB FLASK
@@ -32,8 +48,6 @@ def ejecutar_servidor_web():
 # ==============================================================================
 # ZONA DE ESTRATEGIAS Y ESCÁNER
 # ==============================================================================
-HISTORIAL_SENALES = {}
-
 def calcular_indicadores(velas):
     cierres = [v['close'] for v in velas]
     altos = [v['max'] for v in velas]
@@ -84,29 +98,65 @@ def escanear_mercados():
                         
                     ema, banda_sup, banda_inf, rsi, atr = calcular_indicadores(velas)
                     ultima_vela = velas[-1]
-                    tamaño_vela = abs(ultima_vela['close'] - ultima_vela['open'])
+                    precio_cierre = ultima_vela['close']
+                    tamaño_vela = abs(precio_cierre - ultima_vela['open'])
                     
-                    clave = (divisa, hora_actual[:2])
-                    est = HISTORIAL_SENALES.get(clave, {"ganadas": 0, "perdidas": 0})
-                    tot = est["ganadas"] + est["perdidas"]
-                    if tot > 4 and (est["ganadas"] / tot) < 0.50: continue
                     if tamaño_vela > (atr * 2.5): continue
                         
                     senal = None
-                    if ultima_vela['close'] > ema and ultima_vela['close'] <= banda_inf and rsi < 25:
+                    if precio_cierre > ema and precio_cierre <= banda_inf and rsi < 25:
                         senal = "🟢 COMPRA (CALL) 📈"
-                    elif ultima_vela['close'] < ema and ultima_vela['close'] >= banda_sup and rsi > 75:
+                    elif precio_cierre < ema and precio_cierre >= banda_sup and rsi > 75:
                         senal = "🔴 VENTA (PUT) 📉"
                         
                     if senal:
                         mensaje = f"🎯 *¡SEÑAL FRANCOTIRADOR!*\n\n💱 Divisa: {divisa}\n⚡ Operación: {senal}\n⏱️ Expiración: 1 Minuto"
                         bot_telegram.send_message(TELEGRAM_ID, mensaje, parse_mode="Markdown")
+                        
+                        # Disparar hilo de simulación y guardado para recolectar datos de IA
+                        threading.Thread(
+                            target=simular_operacion, 
+                            args=(divisa, precio_cierre, senal, rsi, atr, banda_sup, banda_inf),
+                            daemon=True
+                        ).start()
+                        
                 except:
                     pass
         time.sleep(10)
 
+def simular_operacion(divisa, precio_entrada, tipo_senal, rsi, atr, banda_sup, banda_inf):
+    global iq_client
+    # Esperar 62 segundos para asegurar la expiración de la vela de 1 minuto
+    time.sleep(62)
+    try:
+        if iq_client and iq_client.check_connect():
+            velas = iq_client.get_candles(divisa, 60, 1, time.time())
+            if not velas: return
+                
+            precio_final = velas[-1]['close']
+            hora_registro = time.strftime("%H:%M:%S")
+            timestamp = int(time.time())
+            
+            ganó = False
+            if "COMPRA" in tipo_senal and precio_final > precio_entrada: ganó = True
+            elif "VENTA" in tipo_senal and precio_final < precio_entrada: ganó = True
+                
+            resultado = 1 if ganó else 0
+            tipo_limpio = "COMPRA" if "COMPRA" in tipo_senal else "VENTA"
+            
+            # GUARDADO DE LA FILA EN EL CSV DE LA NUBE
+            with open(ARCHIVO_HISTORIAL, mode="a", newline="") as f:
+                escritor = csv.writer(f)
+                escritor.writerow([
+                    timestamp, divisa, hora_registro, tipo_limpio,
+                    precio_entrada, precio_final, resultado,
+                    round(rsi, 2), round(atr, 6), round(banda_sup, 6), round(banda_inf, 6)
+                ])
+    except Exception as e:
+        print(f"Error registrando simulación IA: {e}")
+
 # ==============================================================================
-# ESCUCHA DE COMANDOS DE TELEGRAM (Vinculados localmente al proceso principal)
+# ESCUCHA DE COMANDOS DE TELEGRAM
 # ==============================================================================
 @bot_telegram.message_handler(commands=['saldo'])
 def enviar_saldo(message):
@@ -141,7 +191,7 @@ if __name__ == "__main__":
     
     print("⚡ Procesos modulares enlazados. Activando Polling del Bot...")
     
-    # 4. El bucle corre aquí en main, donde están declarados los handlers de comandos
+    # 4. El bucle corre en el hilo principal
     while True:
         try:
             bot_telegram.polling(none_stop=True, interval=2, timeout=20, restart_on_change=True, skip_pending_updates=True)
