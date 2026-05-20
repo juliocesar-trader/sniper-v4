@@ -8,8 +8,8 @@ IQ_PASS = os.getenv("IQ_PASS")
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 TELEGRAM_ID = os.getenv("TELEGRAM_ID")
 
-# 2. Inicialización del objeto de Telegram
-bot_telegram = telebot.TeleBot(TELEGRAM_TOKEN, threaded=True)
+# 2. Inicialización limpia del bot sin configuraciones pesadas
+bot_telegram = telebot.TeleBot(TELEGRAM_TOKEN, threaded=False)
 
 def conectar_broker():
     """Establece y retorna la conexión limpia con el Broker"""
