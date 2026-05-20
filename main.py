@@ -3,14 +3,14 @@ import time
 import threading
 from flask import Flask
 
-# 🔄 IMPORTACIÓN DEL PUENTE: Traemos las conexiones del otro archivo de forma aislada
+# IMPORTACIÓN DEL PUENTE SEGÚN TU NUEVO ESTÁNDAR
 from credenciales import bot_telegram, conectar_broker, TELEGRAM_ID
 
 # ==============================================================================
-# SERVIDOR WEB FLASK (Monitoreo e Inactividad)
+# SERVIDOR WEB FLASK
 # ==============================================================================
 app = Flask(__name__)
-iq_client = None  # Se rellenará al arrancar
+iq_client = None  
 
 @app.route('/')
 def home():
@@ -30,12 +30,11 @@ def ejecutar_servidor_web():
     app.run(host="0.0.0.0", port=puerto)
 
 # ==============================================================================
-# ZONE DE ESTRATEGIAS (Aquí puedes modificar el código en el futuro con total libertad)
+# ZONA DE ESTRATEGIAS Y ESCÁNER
 # ==============================================================================
 HISTORIAL_SENALES = {}
 
 def calcular_indicadores(velas):
-    # (Tus cálculos matemáticos exactos de EMA, Bandas de Bollinger, RSI, ATR)
     cierres = [v['close'] for v in velas]
     altos = [v['max'] for v in velas]
     bajos = [v['min'] for v in velas]
@@ -65,6 +64,7 @@ def calcular_indicadores(velas):
 def escanear_mercados():
     global iq_client
     divisas = ["EURUSD", "GBPUSD", "EURJPY", "AUDUSD"]
+    print("🎯 Francotirador activado. Escaneando divisas...")
     
     while True:
         if iq_client and iq_client.check_connect():
@@ -86,7 +86,6 @@ def escanear_mercados():
                     ultima_vela = velas[-1]
                     tamaño_vela = abs(ultima_vela['close'] - ultima_vela['open'])
                     
-                    # Filtros de protección
                     clave = (divisa, hora_actual[:2])
                     est = HISTORIAL_SENALES.get(clave, {"ganadas": 0, "perdidas": 0})
                     tot = est["ganadas"] + est["perdidas"]
@@ -100,7 +99,6 @@ def escanear_mercados():
                         senal = "🔴 VENTA (PUT) 📉"
                         
                     if senal:
-                        # Enviamos usando el bot importado del puente seguro
                         mensaje = f"🎯 *¡SEÑAL FRANCOTIRADOR!*\n\n💱 Divisa: {divisa}\n⚡ Operación: {senal}\n⏱️ Expiración: 1 Minuto"
                         bot_telegram.send_message(TELEGRAM_ID, mensaje, parse_mode="Markdown")
                 except:
@@ -108,37 +106,45 @@ def escanear_mercados():
         time.sleep(10)
 
 # ==============================================================================
-# ESCUCHA DE COMANDOS DE TELEGRAM
+# ESCUCHA DE COMANDOS DE TELEGRAM (Vinculados localmente al proceso principal)
 # ==============================================================================
 @bot_telegram.message_handler(commands=['saldo'])
 def enviar_saldo(message):
     global iq_client
     if iq_client and iq_client.check_connect():
-        bot_telegram.reply_to(message, f"💰 Saldo de Práctica Real: ${iq_client.get_balance():,.2f} USD")
+        try:
+            bot_telegram.reply_to(message, f"💰 Saldo de Práctica Real: ${iq_client.get_balance():,.2f} USD")
+        except Exception as e:
+            bot_telegram.reply_to(message, f"⚠️ Error leyendo saldo: {e}")
     else:
-        bot_telegram.reply_to(message, "❌ Puente desconectado del broker.")
+        bot_telegram.reply_to(message, "❌ Puente desconectado temporalmente del broker.")
 
 # ==============================================================================
-# ARRANQUE JERÁRQUICA
+# ARRANQUE ORQUESTADO
 # ==============================================================================
 if __name__ == "__main__":
-    try: bot_telegram.remove_webhook(drop_pending_updates=True)
-    except: pass
+    try: 
+        bot_telegram.remove_webhook(drop_pending_updates=True)
+    except: 
+        pass
 
-    # 1. Encender Web
+    # 1. Encender Servidor Web
     threading.Thread(target=ejecutar_servidor_web, daemon=True).start()
     time.sleep(2)
     
-    # 2. Conectar puente con el Broker externo
+    # 2. Conectar puente con el Broker
     iq_client = conectar_broker()
     
     if iq_client:
-        # 3. Si conectó, encender las estrategias en segundo plano
+        # 3. Encender escáner si la conexión fue exitosa
         threading.Thread(target=escanear_mercados, daemon=True).start()
     
-    print("⚡ Procesos modulares listos. Ejecutando canal de Telegram...")
+    print("⚡ Procesos modulares enlazados. Activando Polling del Bot...")
+    
+    # 4. El bucle corre aquí en main, donde están declarados los handlers de comandos
     while True:
         try:
-            bot_telegram.polling(none_stop=True, interval=2, timeout=30, restart_on_change=True, skip_pending_updates=True)
-        except:
+            bot_telegram.polling(none_stop=True, interval=2, timeout=20, restart_on_change=True, skip_pending_updates=True)
+        except Exception as e:
+            print(f"Reiniciando Polling: {e}")
             time.sleep(5)
