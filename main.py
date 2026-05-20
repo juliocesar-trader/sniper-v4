@@ -22,7 +22,7 @@ if not os.path.exists(ARCHIVO_HISTORIAL):
         ])
 
 # ==============================================================================
-# SERVIDOR WEB FLASK (SOPORTE PARA RENDER)
+# SERVIDOR WEB FLASK (SOPORTE PARA RENDER Y EXTRACCIÓN DE DATOS)
 # ==============================================================================
 app = Flask(__name__)
 iq_client = None  
@@ -39,6 +39,15 @@ def home():
         saldo = "$0.00"
     
     return f"<h2>🧠 Sniper V4 - Modo Aprendizaje IA</h2><p><b>Estado:</b> {estado}</p><p><b>Saldo:</b> {saldo}</p>", 200
+
+# NUEVA RUTA INTEGRADA: Ventana de extracción gratuita para el móvil
+@app.route('/descargar-datos-ia')
+def descargar_datos_ia():
+    if os.path.exists(ARCHIVO_HISTORIAL):
+        with open(ARCHIVO_HISTORIAL, "r") as f:
+            contenido = f.read()
+        return f"<pre>{contenido}</pre>", 200, {'Content-Type': 'text/plain; charset=utf-8'}
+    return "⏳ El archivo aún no tiene datos registrados.", 404
 
 def ejecutar_servidor_web():
     puerto = int(os.environ.get("PORT", 10000))
@@ -100,7 +109,6 @@ def escanear_mercados():
                     ema, b_sup, b_inf, rsi, atr = calcular_indicadores(velas)
                     precio_cierre = velas[-1]['close']
                     
-                    # Filtros dinámicos amplios (Dan libertad a que la IA vea qué pasa en los extremos)
                     senal = None
                     if rsi > 65 or precio_cierre >= b_sup:
                         senal = "🔴 VENTA (ESCENARIO IA) 📉"
@@ -108,11 +116,9 @@ def escanear_mercados():
                         senal = "🟢 COMPRA (ESCENARIO IA) 📈"
                     
                     if senal:
-                        # Mandar alerta corta a Telegram para no saturarte
                         mensaje = f"🧠 *ESCENARIO DETECTADO ({divisa})*\n⚡ Tipo: {senal}\n📊 RSI: {round(rsi,1)} | ATR: {round(atr,6)}"
                         bot_telegram.send_message(TELEGRAM_ID, mensaje, parse_mode="Markdown")
                         
-                        # Disparar simulación y registro de aprendizaje en el CSV
                         threading.Thread(
                             target=simular_operacion, 
                             args=(divisa, precio_cierre, senal, rsi, atr, b_sup, b_inf),
@@ -128,7 +134,7 @@ def escanear_mercados():
 
 def simular_operacion(divisa, precio_entrada, tipo_senal, rsi, atr, banda_sup, banda_inf):
     global iq_client
-    time.sleep(61) # Esperamos a que la vela cierre para verificar efectividad
+    time.sleep(61)
     try:
         if iq_client and iq_client.check_connect():
             velas = iq_client.get_candles(divisa, 60, 1, time.time())
@@ -138,7 +144,6 @@ def simular_operacion(divisa, precio_entrada, tipo_senal, rsi, atr, banda_sup, b
             hora_registro = time.strftime("%H:%M:%S")
             timestamp = int(time.time())
             
-            # Evaluar si el escenario fue exitoso o no
             ganó = False
             if "COMPRA" in tipo_senal and precio_final > precio_entrada: ganó = True
             elif "VENTA" in tipo_senal and precio_final < precio_entrada: ganó = True
@@ -146,7 +151,6 @@ def simular_operacion(divisa, precio_entrada, tipo_senal, rsi, atr, banda_sup, b
             resultado = 1 if ganó else 0
             tipo_limpio = "COMPRA" if "COMPRA" in tipo_senal else "VENTA"
             
-            # Guardamos los datos puros en el CSV persistente
             with open(ARCHIVO_HISTORIAL, mode="a", newline="") as f:
                 escritor = csv.writer(f)
                 escritor.writerow([
