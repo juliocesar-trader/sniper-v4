@@ -175,25 +175,24 @@ def enviar_saldo(message):
 # ==============================================================================
 def inicializar_sistema():
     global iq_client
-    # 1. Conectar puente con el Broker de forma asíncrona
     print("🔌 Conectando con IQ Option en segundo plano...")
     iq_client = conectar_broker()
     
     if iq_client:
-        # 2. Encender escáner si la conexión fue exitosa
         threading.Thread(target=escanear_mercados, daemon=True).start()
 
 if __name__ == "__main__":
     try: 
         bot_telegram.remove_webhook(drop_pending_updates=True)
+        time.sleep(1)
     except: 
         pass
 
-    # 1. Encender Servidor Web Flask (Imprescindible para Render)
+    # 1. Encender Servidor Web Flask
     threading.Thread(target=ejecutar_servidor_web, daemon=True).start()
     time.sleep(1)
     
-    # 2. Lanzar la inicialización del broker y escáner en un hilo aislado
+    # 2. Lanzar la inicialización del broker y escáner
     threading.Thread(target=inicializar_sistema, daemon=True).start()
     
     print("⚡ Escucha de Telegram liberada. Activando Polling...")
@@ -201,7 +200,7 @@ if __name__ == "__main__":
     # 3. El hilo principal se queda EXCLUSIVAMENTE escuchando comandos sin interrupciones
     while True:
         try:
-            bot_telegram.polling(none_stop=True, skip_pending_updates=True, timeout=10)
+            bot_telegram.polling(none_stop=True, skip_pending_updates=True, timeout=20, long_polling_timeout=10)
         except Exception as e:
-            print(f"Reiniciando Polling: {e}")
-            time.sleep(3)
+            print(f"Reiniciando Polling por parpadeo de red: {e}")
+            time.sleep(5)
