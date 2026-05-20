@@ -81,52 +81,54 @@ def escanear_mercados():
     print("🎯 Francotirador activado. Escaneando divisas...")
     
     while True:
-        if iq_client and iq_client.check_connect():
-            hora_actual = time.strftime("%H:%M")
-            if "12:30" <= hora_actual <= "13:30":
-                time.sleep(60)
-                continue
-                
-            for divisa in divisas:
-                try:
-                    payouts = iq_client.get_all_profit()
-                    payout = payouts.get(divisa, {}).get("turbo", 0)
-                    if payout < 80: continue
-                        
-                    velas = iq_client.get_candles(divisa, 60, 110, time.time())
-                    if not velas or len(velas) < 100: continue
-                        
-                    ema, banda_sup, banda_inf, rsi, atr = calcular_indicadores(velas)
-                    ultima_vela = velas[-1]
-                    precio_cierre = ultima_vela['close']
-                    tamaño_vela = abs(precio_cierre - ultima_vela['open'])
+        try:
+            if iq_client and iq_client.check_connect():
+                hora_actual = time.strftime("%H:%M")
+                if "12:30" <= hora_actual <= "13:30":
+                    time.sleep(60)
+                    continue
                     
-                    if tamaño_vela > (atr * 2.5): continue
+                for divisa in divisas:
+                    try:
+                        payouts = iq_client.get_all_profit()
+                        payout = payouts.get(divisa, {}).get("turbo", 0)
+                        if payout < 80: continue
+                            
+                        velas = iq_client.get_candles(divisa, 60, 110, time.time())
+                        if not velas or len(velas) < 100: continue
+                            
+                        ema, banda_sup, banda_inf, rsi, atr = calcular_indicadores(velas)
+                        ultima_vela = velas[-1]
+                        precio_cierre = ultima_vela['close']
+                        tamaño_vela = abs(precio_cierre - ultima_vela['open'])
                         
-                    senal = None
-                    if precio_cierre > ema and precio_cierre <= banda_inf and rsi < 25:
-                        senal = "🟢 COMPRA (CALL) 📈"
-                    elif precio_cierre < ema and precio_cierre >= banda_sup and rsi > 75:
-                        senal = "🔴 VENTA (PUT) 📉"
-                        
-                    if senal:
-                        mensaje = f"🎯 *¡SEÑAL FRANCOTIRADOR!*\n\n💱 Divisa: {divisa}\n⚡ Operación: {senal}\n⏱️ Expiración: 1 Minuto"
-                        bot_telegram.send_message(TELEGRAM_ID, mensaje, parse_mode="Markdown")
-                        
-                        # Disparar hilo de simulación y guardado para recolectar datos de IA
-                        threading.Thread(
-                            target=simular_operacion, 
-                            args=(divisa, precio_cierre, senal, rsi, atr, banda_sup, banda_inf),
-                            daemon=True
-                        ).start()
-                        
-                except:
-                    pass
+                        if tamaño_vela > (atr * 2.5): continue
+                            
+                        senal = None
+                        if precio_cierre > ema and precio_cierre <= banda_inf and rsi < 25:
+                            senal = "🟢 COMPRA (CALL) 📈"
+                        elif precio_cierre < ema and precio_cierre >= banda_sup and rsi > 75:
+                            senal = "🔴 VENTA (PUT) 📉"
+                            
+                        if senal:
+                            mensaje = f"🎯 *¡SEÑAL FRANCOTIRADOR!*\n\n💱 Divisa: {divisa}\n⚡ Operación: {senal}\n⏱️ Expiración: 1 Minuto"
+                            bot_telegram.send_message(TELEGRAM_ID, mensaje, parse_mode="Markdown")
+                            
+                            # Disparar hilo de simulación y guardado para recolectar datos de IA
+                            threading.Thread(
+                                target=simular_operacion, 
+                                args=(divisa, precio_cierre, senal, rsi, atr, banda_sup, banda_inf),
+                                daemon=True
+                            ).start()
+                            
+                    except:
+                        pass
+        except:
+            pass
         time.sleep(10)
 
 def simular_operacion(divisa, precio_entrada, tipo_senal, rsi, atr, banda_sup, banda_inf):
     global iq_client
-    # Esperar 62 segundos para asegurar la expiración de la vela de 1 minuto
     time.sleep(62)
     try:
         if iq_client and iq_client.check_connect():
@@ -144,7 +146,6 @@ def simular_operacion(divisa, precio_entrada, tipo_senal, rsi, atr, banda_sup, b
             resultado = 1 if ganó else 0
             tipo_limpio = "COMPRA" if "COMPRA" in tipo_senal else "VENTA"
             
-            # GUARDADO DE LA FILA EN EL CSV DE LA NUBE
             with open(ARCHIVO_HISTORIAL, mode="a", newline="") as f:
                 escritor = csv.writer(f)
                 escritor.writerow([
@@ -170,31 +171,37 @@ def enviar_saldo(message):
         bot_telegram.reply_to(message, "❌ Puente desconectado temporalmente del broker.")
 
 # ==============================================================================
-# ARRANQUE ORQUESTADO
+# ARRANQUE ORQUESTADO ASÍNCRONO
 # ==============================================================================
+def inicializar_sistema():
+    global iq_client
+    # 1. Conectar puente con el Broker de forma asíncrona
+    print("🔌 Conectando con IQ Option en segundo plano...")
+    iq_client = conectar_broker()
+    
+    if iq_client:
+        # 2. Encender escáner si la conexión fue exitosa
+        threading.Thread(target=escanear_mercados, daemon=True).start()
+
 if __name__ == "__main__":
     try: 
         bot_telegram.remove_webhook(drop_pending_updates=True)
     except: 
         pass
 
-    # 1. Encender Servidor Web
+    # 1. Encender Servidor Web Flask (Imprescindible para Render)
     threading.Thread(target=ejecutar_servidor_web, daemon=True).start()
-    time.sleep(2)
+    time.sleep(1)
     
-    # 2. Conectar puente con el Broker
-    iq_client = conectar_broker()
+    # 2. Lanzar la inicialización del broker y escáner en un hilo aislado
+    threading.Thread(target=inicializar_sistema, daemon=True).start()
     
-    if iq_client:
-        # 3. Encender escáner si la conexión fue exitosa
-        threading.Thread(target=escanear_mercados, daemon=True).start()
+    print("⚡ Escucha de Telegram liberada. Activando Polling...")
     
-    print("⚡ Procesos modulares enlazados. Activando Polling del Bot...")
-    
-    # 4. El bucle corre en el hilo principal
+    # 3. El hilo principal se queda EXCLUSIVAMENTE escuchando comandos sin interrupciones
     while True:
         try:
-            bot_telegram.polling(none_stop=True, interval=2, timeout=20, restart_on_change=True, skip_pending_updates=True)
+            bot_telegram.polling(none_stop=True, skip_pending_updates=True, timeout=10)
         except Exception as e:
             print(f"Reiniciando Polling: {e}")
-            time.sleep(5)
+            time.sleep(3)
