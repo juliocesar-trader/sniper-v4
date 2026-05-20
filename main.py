@@ -4,7 +4,7 @@ import threading
 import csv
 from flask import Flask
 
-# IMPORTACIÓN DEL PUENTE SEGÚN TU NUEVO ESTÁNDAR
+# IMPORTACIÓN DEL PUENTE SEGÚN TU ESTÁNDAR
 from credenciales import bot_telegram, conectar_broker, TELEGRAM_ID
 
 # ==============================================================================
@@ -12,7 +12,6 @@ from credenciales import bot_telegram, conectar_broker, TELEGRAM_ID
 # ==============================================================================
 ARCHIVO_HISTORIAL = "historial_operaciones.csv"
 
-# Si el archivo no existe en el servidor de Render, se inicializan las columnas
 if not os.path.exists(ARCHIVO_HISTORIAL):
     with open(ARCHIVO_HISTORIAL, "w", newline="") as f:
         escritor = csv.writer(f)
@@ -23,7 +22,7 @@ if not os.path.exists(ARCHIVO_HISTORIAL):
         ])
 
 # ==============================================================================
-# SERVIDOR WEB FLASK
+# SERVIDOR WEB FLASK (PROVEEDOR DE LINEA DE VIDA PARA RENDER)
 # ==============================================================================
 app = Flask(__name__)
 iq_client = None  
@@ -43,125 +42,68 @@ def home():
 
 def ejecutar_servidor_web():
     puerto = int(os.environ.get("PORT", 10000))
-    app.run(host="0.0.0.0", port=puerto)
+    print(f"📡 Iniciando servidor Web de soporte en puerto {puerto}...")
+    app.run(host="0.0.0.0", port=puerto, debug=False, use_reloader=False)
 
 # ==============================================================================
-# ZONA DE ESTRATEGIAS Y ESCÁNER
+# ESCÁNER DIRECTO DE MUESTRA (TEST FORZADO)
 # ==============================================================================
-def calcular_indicadores(velas):
-    cierres = [v['close'] for v in velas]
-    altos = [v['max'] for v in velas]
-    bajos = [v['min'] for v in velas]
-    
-    k = 2 / (100 + 1)
-    ema = cierres[0]
-    for c in cierres[1:]: ema = (c * k) + (ema * (1 - k))
-        
-    ultimas_20 = cierres[-20:]
-    sma_20 = sum(ultimas_20) / 20
-    varianza = sum((x - sma_20) ** 2 for x in ultimas_20) / 20
-    desviacion = varianza ** 0.5
-    
-    ganancias, perdidas = 0, 0
-    for i in range(len(cierres)-14, len(cierres)):
-        cambio = cierres[i] - cierres[i-1]
-        if cambio > 0: ganancias += cambio
-        else: perdidas += abs(cambio)
-    rs = (ganancias / 14) / ((perdidas / 14) + 1e-10)
-    
-    tr_tot = 0
-    for i in range(len(velas)-14, len(velas)):
-        tr_tot += max(altos[i] - bajos[i], abs(altos[i] - cierres[i-1]), abs(bajos[i] - cierres[i-1]))
-        
-    return ema, sma_20 + (2 * desviacion), sma_20 - (2 * desviacion), 100 - (100 / (1 + rs)), tr_tot / 14
-
 def escanear_mercados():
     global iq_client
-    divisas = ["EURUSD", "GBPUSD", "EURJPY", "AUDUSD"]
-    print("🎯 Francotirador activado. Escaneando divisas...")
+    print("🎯 MODO TEST ACTIVADO: Forzando señales cada 30 segundos...")
     
+    # Intentamos enviar una alerta inicial de confirmación directo al arrancar
+    try:
+        bot_telegram.send_message(TELEGRAM_ID, "🚀 *Sistema de Alertas Forzadas Inicializado con Éxito*", parse_mode="Markdown")
+    except Exception as e:
+        print(f"❌ Error crítico enviando mensaje de arranque inicial: {e}")
+
     while True:
         try:
-            if iq_client and iq_client.check_connect():
-                hora_actual = time.strftime("%H:%M")
-                if "12:30" <= hora_actual <= "13:30":
-                    time.sleep(60)
-                    continue
-                    
-                for divisa in divisas:
-                    try:
-                        payouts = iq_client.get_all_profit()
-                        payout = payouts.get(divisa, {}).get("turbo", 0)
-                        if payout < 80: continue
-                            
-                        velas = iq_client.get_candles(divisa, 60, 110, time.time())
-                        if not velas or len(velas) < 100: continue
-                            
-                        ema, banda_sup, banda_inf, rsi, atr = calcular_indicadores(velas)
-                        ultima_vela = velas[-1]
-                        precio_cierre = ultima_vela['close']
-                        tamaño_vela = abs(precio_cierre - ultima_vela['open'])
-                        
-                        if tamaño_vela > (atr * 2.5): continue
-                            
-                        senal = None
-                        if precio_cierre > ema and precio_cierre <= banda_inf and rsi < 25:
-                            senal = "🟢 COMPRA (CALL) 📈"
-                        elif precio_cierre < ema and precio_cierre >= banda_sup and rsi > 75:
-                            senal = "🔴 VENTA (PUT) 📉"
-                            
-                        if senal:
-                            mensaje = f"🎯 *¡SEÑAL FRANCOTIRADOR!*\n\n💱 Divisa: {divisa}\n⚡ Operación: {senal}\n⏱️ Expiración: 1 Minuto"
-                            bot_telegram.send_message(TELEGRAM_ID, mensaje, parse_mode="Markdown")
-                            
-                            # Disparar hilo de simulación y guardado para recolectar datos de IA
-                            threading.Thread(
-                                target=simular_operacion, 
-                                args=(divisa, precio_cierre, senal, rsi, atr, banda_sup, banda_inf),
-                                daemon=True
-                            ).start()
-                            
-                    except:
-                        pass
-        except:
-            pass
-        time.sleep(10)
+            divisa = "EURUSD"
+            precio_cierre = 1.08500
+            rsi, atr, banda_sup, banda_inf = 50.0, 0.00012, 1.08600, 1.08400
+            senal = "🟢 COMPRA (TEST DE CONEXIÓN) 📈"
+            
+            mensaje = f"🧪 *TEST FRANCOTIRADOR*\n\n💱 Divisa: {divisa}\n⚡ Operación: {senal}\n⏱️ Expiración: 1 Minuto"
+            bot_telegram.send_message(TELEGRAM_ID, mensaje, parse_mode="Markdown")
+            print("📬 Señal de prueba enviada a Telegram.")
+            
+            # Registrar simulación de forma asíncrona
+            threading.Thread(
+                target=simular_operacion, 
+                args=(divisa, precio_cierre, senal, rsi, atr, banda_sup, banda_inf),
+                daemon=True
+            ).start()
+            
+        except Exception as e:
+            print(f"⚠️ Error en bucle de escáner: {e}")
+            
+        time.sleep(30)
 
 def simular_operacion(divisa, precio_entrada, tipo_senal, rsi, atr, banda_sup, banda_inf):
-    global iq_client
-    time.sleep(62)
+    time.sleep(5)
     try:
-        if iq_client and iq_client.check_connect():
-            velas = iq_client.get_candles(divisa, 60, 1, time.time())
-            if not velas: return
-                
-            precio_final = velas[-1]['close']
-            hora_registro = time.strftime("%H:%M:%S")
-            timestamp = int(time.time())
-            
-            ganó = False
-            if "COMPRA" in tipo_senal and precio_final > precio_entrada: ganó = True
-            elif "VENTA" in tipo_senal and precio_final < precio_entrada: ganó = True
-                
-            resultado = 1 if ganó else 0
-            tipo_limpio = "COMPRA" if "COMPRA" in tipo_senal else "VENTA"
-            
-            with open(ARCHIVO_HISTORIAL, mode="a", newline="") as f:
-                escritor = csv.writer(f)
-                escritor.writerow([
-                    timestamp, divisa, hora_registro, tipo_limpio,
-                    precio_entrada, precio_final, resultado,
-                    round(rsi, 2), round(atr, 6), round(banda_sup, 6), round(banda_inf, 6)
-                ])
+        hora_registro = time.strftime("%H:%M:%S")
+        timestamp = int(time.time())
+        with open(ARCHIVO_HISTORIAL, mode="a", newline="") as f:
+            escritor = csv.writer(f)
+            escritor.writerow([
+                timestamp, divisa, hora_registro, "COMPRA",
+                precio_entrada, precio_entrada + 0.00002, 1,
+                round(rsi, 2), round(atr, 6), round(banda_sup, 6), round(banda_inf, 6)
+            ])
+        print("💾 Datos del test guardados en el historial CSV.")
     except Exception as e:
-        print(f"Error registrando simulación IA: {e}")
+        print(f"Error registrando simulación: {e}")
 
 # ==============================================================================
-# ESCUCHA DE COMANDOS DE TELEGRAM
+# MANEJADOR DE COMANDOS (BOT DE TELEGRAM)
 # ==============================================================================
 @bot_telegram.message_handler(commands=['saldo'])
 def enviar_saldo(message):
     global iq_client
+    print(f"📥 Comando /saldo recibido de {message.chat.id}")
     if iq_client and iq_client.check_connect():
         try:
             bot_telegram.reply_to(message, f"💰 Saldo de Práctica Real: ${iq_client.get_balance():,.2f} USD")
@@ -171,36 +113,37 @@ def enviar_saldo(message):
         bot_telegram.reply_to(message, "❌ Puente desconectado temporalmente del broker.")
 
 # ==============================================================================
-# ARRANQUE ORQUESTADO ASÍNCRONO
+# FLUJO DE ARRANQUE SECUENCIAL REESTRUCTURADO
 # ==============================================================================
-def inicializar_sistema():
-    global iq_client
-    print("🔌 Conectando con IQ Option en segundo plano...")
-    iq_client = conectar_broker()
-    
-    if iq_client:
-        threading.Thread(target=escanear_mercados, daemon=True).start()
-
 if __name__ == "__main__":
+    print("⚡ Iniciando orquestación secuencial Sniper V4...")
+    
+    # 1. Eliminar cualquier Webhook colgado de configuraciones previas
     try: 
         bot_telegram.remove_webhook(drop_pending_updates=True)
         time.sleep(1)
-    except: 
-        pass
+    except Exception as e: 
+        print(f"Aviso de Webhook: {e}")
 
-    # 1. Encender Servidor Web Flask
-    threading.Thread(target=ejecutar_servidor_web, daemon=True).start()
-    time.sleep(1)
-    
-    # 2. Lanzar la inicialización del broker y escáner
-    threading.Thread(target=inicializar_sistema, daemon=True).start()
-    
-    print("⚡ Escucha de Telegram liberada. Activando Polling...")
-    
-    # 3. El hilo principal se queda EXCLUSIVAMENTE escuchando comandos sin interrupciones
+    # 2. Conectar al broker de inmediato en el hilo principal
+    print("🔌 Conectando con IQ Option...")
+    iq_client = conectar_broker()
+
+    # 3. Lanzar el Servidor Web (Flask) en un hilo secundario aislado
+    t_web = threading.Thread(target=ejecutar_servidor_web, daemon=True)
+    t_web.start()
+    time.sleep(2)
+
+    # 4. Lanzar el escáner de mercados forzado en otro hilo secundario aislado
+    t_escaner = threading.Thread(target=escanear_mercados, daemon=True)
+    t_escaner.start()
+
+    # 5. ANCLAR EL HILO PRINCIPAL AL POLLING DE TELEGRAM
+    # Esto obliga a Render a mantener todo el script vivo y despierto
+    print("🚀 Servidores acoplados. Activando escucha continua de Telegram (Polling)...")
     while True:
         try:
             bot_telegram.polling(none_stop=True, skip_pending_updates=True, timeout=20, long_polling_timeout=10)
         except Exception as e:
-            print(f"Reiniciando Polling por parpadeo de red: {e}")
+            print(f"🔄 Reiniciando Polling de Telegram de forma automática por desconexión: {e}")
             time.sleep(5)
