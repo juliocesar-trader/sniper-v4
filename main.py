@@ -1,113 +1,74 @@
 import os
-import sys
-import json
 import time
 import threading
-import telebot
 from flask import Flask
-from iqoptionapi.stable_api import IQ_Option
+
+# 🔄 IMPORTACIÓN DEL PUENTE: Traemos las conexiones del otro archivo de forma aislada
+from credenciales import bot_telegram, conectar_broker, TELEGRAM_ID
 
 # ==============================================================================
-# 1. SERVIDOR WEB FLASK (Con Diagnóstico de Conexión para el Usuario)
+# SERVIDOR WEB FLASK (Monitoreo e Inactividad)
 # ==============================================================================
 app = Flask(__name__)
+iq_client = None  # Se rellenará al arrancar
 
 @app.route('/')
 def home():
     global iq_client
-    # Monitoreo visual desde el navegador
     if iq_client and iq_client.check_connect():
-        estado_broker = "🟢 CONECTADO DE FORMA EXITOSA A IQ OPTION"
-        try:
-            saldo = f"${iq_client.get_balance():,.2f} USD"
-        except:
-            saldo = "No disponible temporalmente"
+        estado = "🟢 PUENTE OPERANDO - CONECTADO A IQ OPTION"
+        try: saldo = f"${iq_client.get_balance():,.2f} USD"
+        except: saldo = "Cargando..."
     else:
-        estado_broker = "❌ DESCONECTADO O FALLA DE AUTENTICACIÓN"
+        estado = "❌ PUENTE CAÍDO O DESCONECTADO"
         saldo = "$0.00"
-
-    html = f"""
-    <div style="font-family: sans-serif; text-align: center; padding: 50px;">
-        <h2>🚀 Servidor Sniper V4 en Ejecución Continua</h2>
-        <p style="font-size: 1.2em;"><b>Estado del Broker:</b> {estado_broker}</p>
-        <p style="font-size: 1.2em;"><b>Saldo de Práctica:</b> {saldo}</p>
-        <hr style="width: 50%; margin: 20px auto;">
-        <p style="color: gray;">Usa tu monitor externo para mantener esta pestaña activa 24/7.</p>
-    </div>
-    """
-    return html, 200
+    
+    return f"<h2>🚀 Sniper V4 Modularizado</h2><p><b>Estado:</b> {estado}</p><p><b>Saldo:</b> {saldo}</p>", 200
 
 def ejecutar_servidor_web():
     puerto = int(os.environ.get("PORT", 10000))
     app.run(host="0.0.0.0", port=puerto)
 
 # ==============================================================================
-# 2. CONFIGURACIÓN DE INSTANCIA Y VARIABLES DE ENTORNO
+# ZONE DE ESTRATEGIAS (Aquí puedes modificar el código en el futuro con total libertad)
 # ==============================================================================
-IQ_USER = os.getenv("IQ_USER")
-IQ_PASS = os.getenv("IQ_PASS")
-TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
-TELEGRAM_ID = os.getenv("TELEGRAM_ID")
-
-# Usamos hilos en el bot para evitar que las funciones bloqueen las respuestas
-bot_telegram = telebot.TeleBot(TELEGRAM_TOKEN, threaded=True)
-iq_client = None
-
 HISTORIAL_SENALES = {}
 
-# ==============================================================================
-# 3. MÓDULO MATEMÁTICO: INDICADORES TÉCNICOS
-# ==============================================================================
 def calcular_indicadores(velas):
+    # (Tus cálculos matemáticos exactos de EMA, Bandas de Bollinger, RSI, ATR)
     cierres = [v['close'] for v in velas]
     altos = [v['max'] for v in velas]
     bajos = [v['min'] for v in velas]
     
-    periodo_ema = 100
-    k = 2 / (periodo_ema + 1)
+    k = 2 / (100 + 1)
     ema = cierres[0]
-    for c in cierres[1:]:
-        ema = (c * k) + (ema * (1 - k))
+    for c in cierres[1:]: ema = (c * k) + (ema * (1 - k))
         
     ultimas_20 = cierres[-20:]
     sma_20 = sum(ultimas_20) / 20
     varianza = sum((x - sma_20) ** 2 for x in ultimas_20) / 20
     desviacion = varianza ** 0.5
-    banda_sup = sma_20 + (2 * desviacion)
-    banda_inf = sma_20 - (2 * desviacion)
     
-    ganancias = 0
-    perdidas = 0
+    ganancias, perdidas = 0, 0
     for i in range(len(cierres)-14, len(cierres)):
         cambio = cierres[i] - cierres[i-1]
         if cambio > 0: ganancias += cambio
         else: perdidas += abs(cambio)
     rs = (ganancias / 14) / ((perdidas / 14) + 1e-10)
-    rsi = 100 - (100 / (1 + rs))
     
     tr_tot = 0
     for i in range(len(velas)-14, len(velas)):
-        h_l = altos[i] - bajos[i]
-        h_pc = abs(altos[i] - cierres[i-1])
-        l_pc = abs(bajos[i] - cierres[i-1])
-        tr_tot += max(h_l, h_pc, l_pc)
-    atr = tr_tot / 14
-    
-    return ema, banda_sup, banda_inf, rsi, atr
+        tr_tot += max(altos[i] - bajos[i], abs(altos[i] - cierres[i-1]), abs(bajos[i] - cierres[i-1]))
+        
+    return ema, sma_20 + (2 * desviacion), sma_20 - (2 * desviacion), 100 - (100 / (1 + rs)), tr_tot / 14
 
-# ==============================================================================
-# 4. PROCESO DE MONITOREO DINÁMICO EN TIEMPO REAL
-# ==============================================================================
 def escanear_mercados():
     global iq_client
     divisas = ["EURUSD", "GBPUSD", "EURJPY", "AUDUSD"]
     
-    print("🎯 Francotirador activado. Escaneando divisas...")
-    
     while True:
         if iq_client and iq_client.check_connect():
             hora_actual = time.strftime("%H:%M")
-            
             if "12:30" <= hora_actual <= "13:30":
                 time.sleep(60)
                 continue
@@ -116,139 +77,68 @@ def escanear_mercados():
                 try:
                     payouts = iq_client.get_all_profit()
                     payout = payouts.get(divisa, {}).get("turbo", 0)
-                    if payout < 80:
-                        continue
+                    if payout < 80: continue
                         
                     velas = iq_client.get_candles(divisa, 60, 110, time.time())
-                    if not velas or len(velas) < 100:
-                        continue
+                    if not velas or len(velas) < 100: continue
                         
                     ema, banda_sup, banda_inf, rsi, atr = calcular_indicadores(velas)
-                    
                     ultima_vela = velas[-1]
-                    precio_cierre = ultima_vela['close']
-                    precio_apertura = ultima_vela['open']
-                    tamaño_vela = abs(precio_cierre - precio_apertura)
+                    tamaño_vela = abs(ultima_vela['close'] - ultima_vela['open'])
                     
-                    clave_optimizacion = (divisa, hora_actual[:2])
-                    estadistica = HISTORIAL_SENALES.get(clave_optimizacion, {"ganadas": 0, "perdidas": 0})
-                    totales = estadistica["ganadas"] + estadistica["perdidas"]
-                    
-                    if totales > 4 and (estadistica["ganadas"] / totales) < 0.50:
-                        continue
-                    
-                    if tamaño_vela > (atr * 2.5):
-                        continue
+                    # Filtros de protección
+                    clave = (divisa, hora_actual[:2])
+                    est = HISTORIAL_SENALES.get(clave, {"ganadas": 0, "perdidas": 0})
+                    tot = est["ganadas"] + est["perdidas"]
+                    if tot > 4 and (est["ganadas"] / tot) < 0.50: continue
+                    if tamaño_vela > (atr * 2.5): continue
                         
                     senal = None
-                    if precio_cierre > ema and precio_cierre <= banda_inf and rsi < 25:
+                    if ultima_vela['close'] > ema and ultima_vela['close'] <= banda_inf and rsi < 25:
                         senal = "🟢 COMPRA (CALL) 📈"
-                    elif precio_cierre < ema and precio_cierre >= banda_sup and rsi > 75:
+                    elif ultima_vela['close'] < ema and ultima_vela['close'] >= banda_sup and rsi > 75:
                         senal = "🔴 VENTA (PUT) 📉"
                         
                     if senal:
-                        mensaje = (
-                            f"🎯 *¡SEÑAL FRANCOTIRADOR!*\n\n"
-                            f"💱 Divisa: {divisa}\n"
-                            f"⚡ Operación: {senal}\n"
-                            f"⏱️ Expiración: 1 Minuto\n"
-                            f"📊 Payout Activo: {payout}%\n"
-                            f"🛡️ Filtros pasados con éxito."
-                        )
+                        # Enviamos usando el bot importado del puente seguro
+                        mensaje = f"🎯 *¡SEÑAL FRANCOTIRADOR!*\n\n💱 Divisa: {divisa}\n⚡ Operación: {senal}\n⏱️ Expiración: 1 Minuto"
                         bot_telegram.send_message(TELEGRAM_ID, mensaje, parse_mode="Markdown")
-                        threading.Thread(target=simular_operacion, args=(divisa, precio_cierre, senal, clave_optimizacion)).start()
-                        
-                except Exception as e:
-                    print(f"⚠️ Alerta menor en escaneo de {divisa}: {e}")
-                    
+                except:
+                    pass
         time.sleep(10)
 
-def simular_operacion(divisa, precio_entrada, tipo_senal, clave_optimizacion):
-    global iq_client
-    time.sleep(62)
-    try:
-        velas = iq_client.get_candles(divisa, 60, 1, time.time())
-        precio_final = velas[-1]['close']
-        
-        ganó = False
-        if "COMPRA" in tipo_senal and precio_final > precio_entrada: ganó = True
-        elif "VENTA" in tipo_senal and precio_final < precio_entrada: ganó = True
-        
-        if clave_optimizacion not in HISTORIAL_SENALES:
-            HISTORIAL_SENALES[clave_optimizacion] = {"ganadas": 0, "perdidas": 0}
-            
-        if ganó:
-            HISTORIAL_SENALES[clave_optimizacion]["ganadas"] += 1
-        else:
-            HISTORIAL_SENALES[clave_optimizacion]["perdidas"] += 1
-    except:
-        pass
-
 # ==============================================================================
-# 5. CONEXIÓN AL BROKER IQ OPTION
-# ==============================================================================
-def conectar_iq_option():
-    global iq_client
-    try:
-        print("💡 Conectando a IQ Option...")
-        iq_client = IQ_Option(IQ_USER, IQ_PASS)
-        status, reason = iq_client.connect()
-        
-        if status:
-            print("🟢 Conexión exitosa con IQ Option.")
-            bot_telegram.send_message(TELEGRAM_ID, "🤖 ¡Sniper V4 enlazado correctamente a IQ Option y listo!")
-            
-            hilo_escaner = threading.Thread(target=escanear_mercados)
-            hilo_escaner.daemon = True
-            hilo_escaner.start()
-        else:
-            print(f"❌ Falló IQ Option: {reason}")
-    except Exception as e:
-        print(f"❌ Error crítico IQ Option: {e}")
-
-# ==============================================================================
-# 6. MANEJADORES DE EVENTOS DE TELEGRAM
+# ESCUCHA DE COMANDOS DE TELEGRAM
 # ==============================================================================
 @bot_telegram.message_handler(commands=['saldo'])
 def enviar_saldo(message):
     global iq_client
     if iq_client and iq_client.check_connect():
-        try:
-            saldo_real_broker = iq_client.get_balance()
-            respuesta = f"💰 Saldo de Práctica Real: ${saldo_real_broker:,.2f} USD"
-        except Exception as e:
-            respuesta = f"⚠️ Error al leer saldo: {e}"
+        bot_telegram.reply_to(message, f"💰 Saldo de Práctica Real: ${iq_client.get_balance():,.2f} USD")
     else:
-        respuesta = "❌ El bot no está conectado a IQ Option."
-    bot_telegram.reply_to(message, respuesta)
+        bot_telegram.reply_to(message, "❌ Puente desconectado del broker.")
 
 # ==============================================================================
-# 7. INICIALIZACIÓN
+# ARRANQUE JERÁRQUICA
 # ==============================================================================
 if __name__ == "__main__":
-    # 1. Forzar limpieza de webhooks trabados
-    try:
-        bot_telegram.remove_webhook(drop_pending_updates=True)
-    except:
-        pass
+    try: bot_telegram.remove_webhook(drop_pending_updates=True)
+    except: pass
 
-    # 2. Arrancar servidor web Flask
-    hilo_web = threading.Thread(target=ejecutar_servidor_web)
-    hilo_web.daemon = True
-    hilo_web.start()
-    
+    # 1. Encender Web
+    threading.Thread(target=ejecutar_servidor_web, daemon=True).start()
     time.sleep(2)
     
-    # 3. Conectar a IQ Option en segundo plano
-    hilo_iq = threading.Thread(target=conectar_iq_option)
-    hilo_iq.daemon = True
-    hilo_iq.start()
+    # 2. Conectar puente con el Broker externo
+    iq_client = conectar_broker()
     
-    print("⚡ Procesos listos. Iniciando Polling...")
+    if iq_client:
+        # 3. Si conectó, encender las estrategias en segundo plano
+        threading.Thread(target=escanear_mercados, daemon=True).start()
     
-    # 4. Bucle principal de Telegram corregido (evita congelamiento de comandos)
+    print("⚡ Procesos modulares listos. Ejecutando canal de Telegram...")
     while True:
         try:
-            bot_telegram.polling(none_stop=True, interval=3, timeout=20, long_polling_timeout=20)
-        except Exception as e:
+            bot_telegram.polling(none_stop=True, interval=2, timeout=30, restart_on_change=True, skip_pending_updates=True)
+        except:
             time.sleep(5)
