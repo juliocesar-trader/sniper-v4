@@ -8,13 +8,34 @@ from flask import Flask
 from iqoptionapi.stable_api import IQ_Option
 
 # ==============================================================================
-# 1. SERVIDOR WEB FLASK (Bindeo de Puerto prioritario para Render)
+# 1. SERVIDOR WEB FLASK (Con Diagnóstico de Conexión para el Usuario)
 # ==============================================================================
 app = Flask(__name__)
 
 @app.route('/')
 def home():
-    return "🚀 Servidor Sniper V4 en ejecución continua y estable.", 200
+    global iq_client
+    # Monitoreo visual desde el navegador
+    if iq_client and iq_client.check_connect():
+        estado_broker = "🟢 CONECTADO DE FORMA EXITOSA A IQ OPTION"
+        try:
+            saldo = f"${iq_client.get_balance():,.2f} USD"
+        except:
+            saldo = "No disponible temporalmente"
+    else:
+        estado_broker = "❌ DESCONECTADO O FALLA DE AUTENTICACIÓN"
+        saldo = "$0.00"
+
+    html = f"""
+    <div style="font-family: sans-serif; text-align: center; padding: 50px;">
+        <h2>🚀 Servidor Sniper V4 en Ejecución Continua</h2>
+        <p style="font-size: 1.2em;"><b>Estado del Broker:</b> {estado_broker}</p>
+        <p style="font-size: 1.2em;"><b>Saldo de Práctica:</b> {saldo}</p>
+        <hr style="width: 50%; margin: 20px auto;">
+        <p style="color: gray;">Usa tu monitor externo para mantener esta pestaña activa 24/7.</p>
+    </div>
+    """
+    return html, 200
 
 def ejecutar_servidor_web():
     puerto = int(os.environ.get("PORT", 10000))
@@ -28,29 +49,26 @@ IQ_PASS = os.getenv("IQ_PASS")
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 TELEGRAM_ID = os.getenv("TELEGRAM_ID")
 
-bot_telegram = telebot.TeleBot(TELEGRAM_TOKEN, threaded=False)
+# Usamos hilos en el bot para evitar que las funciones bloqueen las respuestas
+bot_telegram = telebot.TeleBot(TELEGRAM_TOKEN, threaded=True)
 iq_client = None
 
-# Base de datos en memoria para el aprendizaje y optimización del bot
 HISTORIAL_SENALES = {}
 
 # ==============================================================================
-# 3. MÓDULO MATEMÁTICO: INDICADORES TÉCNICOS Y FILTROS FRANCOTIRADOR
+# 3. MÓDULO MATEMÁTICO: INDICADORES TÉCNICOS
 # ==============================================================================
 def calcular_indicadores(velas):
-    """Calcula EMA, Bandas de Bollinger, RSI y ATR sobre una lista de velas"""
     cierres = [v['close'] for v in velas]
     altos = [v['max'] for v in velas]
     bajos = [v['min'] for v in velas]
     
-    # 1. EMA (Media Móvil Exponencial) - Periodo 100
     periodo_ema = 100
     k = 2 / (periodo_ema + 1)
     ema = cierres[0]
     for c in cierres[1:]:
         ema = (c * k) + (ema * (1 - k))
         
-    # 2. Bandas de Bollinger (Periodo 20, Desviación 2)
     ultimas_20 = cierres[-20:]
     sma_20 = sum(ultimas_20) / 20
     varianza = sum((x - sma_20) ** 2 for x in ultimas_20) / 20
@@ -58,7 +76,6 @@ def calcular_indicadores(velas):
     banda_sup = sma_20 + (2 * desviacion)
     banda_inf = sma_20 - (2 * desviacion)
     
-    # 3. RSI (Índice de Fuerza Relativa) - Periodo 14
     ganancias = 0
     perdidas = 0
     for i in range(len(cierres)-14, len(cierres)):
@@ -68,7 +85,6 @@ def calcular_indicadores(velas):
     rs = (ganancias / 14) / ((perdidas / 14) + 1e-10)
     rsi = 100 - (100 / (1 + rs))
     
-    # 4. ATR (Average True Range) - Medidor de Volatilidad (Periodo 14)
     tr_tot = 0
     for i in range(len(velas)-14, len(velas)):
         h_l = altos[i] - bajos[i]
@@ -137,7 +153,7 @@ def escanear_mercados():
                             f"⚡ Operación: {senal}\n"
                             f"⏱️ Expiración: 1 Minuto\n"
                             f"📊 Payout Activo: {payout}%\n"
-                            f"🛡️ Filtros integrados: ATR y EMA pasados con éxito."
+                            f"🛡️ Filtros pasados con éxito."
                         )
                         bot_telegram.send_message(TELEGRAM_ID, mensaje, parse_mode="Markdown")
                         threading.Thread(target=simular_operacion, args=(divisa, precio_cierre, senal, clave_optimizacion)).start()
@@ -165,9 +181,8 @@ def simular_operacion(divisa, precio_entrada, tipo_senal, clave_optimizacion):
             HISTORIAL_SENALES[clave_optimizacion]["ganadas"] += 1
         else:
             HISTORIAL_SENALES[clave_optimizacion]["perdidas"] += 1
-            
-    except Exception as e:
-        print(f"No se pudo completar la simulación: {e}")
+    except:
+        pass
 
 # ==============================================================================
 # 5. CONEXIÓN AL BROKER IQ OPTION
@@ -175,30 +190,24 @@ def simular_operacion(divisa, precio_entrada, tipo_senal, clave_optimizacion):
 def conectar_iq_option():
     global iq_client
     try:
-        print("💡 Conectando de forma oficial a IQ Option...")
+        print("💡 Conectando a IQ Option...")
         iq_client = IQ_Option(IQ_USER, IQ_PASS)
         status, reason = iq_client.connect()
         
         if status:
-            print("🟢 Conexión exitosa y confirmada con IQ Option.")
-            mensaje_exito = (
-                "🤖 ¡Sniper V4 Online!\n\n"
-                "🛡️ Estrategia de Triple Confirmación y Filtro ATR Activos.\n"
-                "💎 El bot ya está rastreando el mercado en segundo plano."
-            )
-            bot_telegram.send_message(TELEGRAM_ID, mensaje_exito)
+            print("🟢 Conexión exitosa con IQ Option.")
+            bot_telegram.send_message(TELEGRAM_ID, "🤖 ¡Sniper V4 enlazado correctamente a IQ Option y listo!")
             
             hilo_escaner = threading.Thread(target=escanear_mercados)
             hilo_escaner.daemon = True
             hilo_escaner.start()
         else:
-            print(f"❌ Falló la autenticación en el broker: {reason}")
-            
+            print(f"❌ Falló IQ Option: {reason}")
     except Exception as e:
-        print(f"❌ Error crítico en infraestructura de IQ Option: {str(e)}")
+        print(f"❌ Error crítico IQ Option: {e}")
 
 # ==============================================================================
-# 6. MANEJADORES DE EVENTOS (TELEGRAM DISPATCHERS)
+# 6. MANEJADORES DE EVENTOS DE TELEGRAM
 # ==============================================================================
 @bot_telegram.message_handler(commands=['saldo'])
 def enviar_saldo(message):
@@ -206,43 +215,40 @@ def enviar_saldo(message):
     if iq_client and iq_client.check_connect():
         try:
             saldo_real_broker = iq_client.get_balance()
-            respuesta = f"💰 Saldo de Práctica Real: ${saldo_real_broker:,.2f} USD\n🔒 Canal seguro 24/7 sin suspensiones."
-        except Exception as error_saldo:
-            respuesta = f"⚠️ Conectado, pero no se pudo leer el saldo: {str(error_saldo)}"
+            respuesta = f"💰 Saldo de Práctica Real: ${saldo_real_broker:,.2f} USD"
+        except Exception as e:
+            respuesta = f"⚠️ Error al leer saldo: {e}"
     else:
-        respuesta = "❌ El bot no está conectado a IQ Option en este momento."
+        respuesta = "❌ El bot no está conectado a IQ Option."
     bot_telegram.reply_to(message, respuesta)
 
 # ==============================================================================
-# 7. INICIALIZACIÓN Y ORQUESTACIÓN CON SISTEMA DE PURGA BLINDADO
+# 7. INICIALIZACIÓN
 # ==============================================================================
 if __name__ == "__main__":
-    print("🚀 Arrancando secuencia de inicialización Sniper V4...")
-    
+    # 1. Forzar limpieza de webhooks trabados
+    try:
+        bot_telegram.remove_webhook(drop_pending_updates=True)
+    except:
+        pass
+
+    # 2. Arrancar servidor web Flask
     hilo_web = threading.Thread(target=ejecutar_servidor_web)
     hilo_web.daemon = True
     hilo_web.start()
-    print("🌐 Servidor Web levantado de manera prioritaria.")
     
     time.sleep(2)
     
-    # Intento de purga inicial forzada de webhook
-    try:
-        bot_telegram.remove_webhook(drop_pending_updates=True)
-    except Exception:
-        pass
-    
+    # 3. Conectar a IQ Option en segundo plano
     hilo_iq = threading.Thread(target=conectar_iq_option)
     hilo_iq.daemon = True
     hilo_iq.start()
     
-    print("⚡ Bot de Telegram listo y escuchando órdenes sin colisiones...")
+    print("⚡ Procesos listos. Iniciando Polling...")
     
-    # Bucle de polling blindado contra errores 409
+    # 4. Bucle principal de Telegram corregido (evita congelamiento de comandos)
     while True:
         try:
-            # restart_on_change=True rompe hilos viejos duplicados instantáneamente en la API de Telegram
-            bot_telegram.polling(none_stop=True, interval=2, timeout=30, restart_on_change=True)
+            bot_telegram.polling(none_stop=True, interval=3, timeout=20, long_polling_timeout=20)
         except Exception as e:
-            print(f"🔄 Limpiando colisión / Reiniciando bucle: {e}")
             time.sleep(5)
