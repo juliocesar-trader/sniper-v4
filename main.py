@@ -28,6 +28,7 @@ IQ_PASS = os.getenv("IQ_PASS")
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 TELEGRAM_ID = os.getenv("TELEGRAM_ID")
 
+# Agregamos skip_pending_updates=True directamente para limpiar mensajes acumulados
 bot_telegram = telebot.TeleBot(TELEGRAM_TOKEN, threaded=False)
 iq_client = None
 
@@ -170,7 +171,7 @@ def simular_operacion(divisa, precio_entrada, tipo_senal, clave_optimizacion):
         print(f"No se pudo completar la simulación: {e}")
 
 # ==============================================================================
-# 5. CONEXIÓN AL BROKER IQ OPTION
+# 5. CONEXIÓN AL BROKER IQ OPTION (Auto-Mantenimiento Asegurado)
 # ==============================================================================
 def conectar_iq_option():
     global iq_client
@@ -182,9 +183,9 @@ def conectar_iq_option():
         if status:
             print("🟢 Conexión exitosa y confirmada con IQ Option.")
             mensaje_exito = (
-                "🤖 ¡Sniper V4 Online!\n\n"
-                "🛡️ Estrategia de Triple Confirmación y Filtro ATR Activos.\n"
-                "💎 El bot ya está rastreando el mercado en segundo plano."
+                "🤖 ¡Sniper V4 Online y Despierto!\n\n"
+                "🛡️ Sistema de Triple Confirmación activo.\n"
+                "💎 Enviando saldo para verificar disponibilidad..."
             )
             bot_telegram.send_message(TELEGRAM_ID, mensaje_exito)
             
@@ -226,7 +227,6 @@ if __name__ == "__main__":
     
     time.sleep(2)
     
-    # Intento de purga inicial forzada de webhook
     try:
         bot_telegram.remove_webhook(drop_pending_updates=True)
     except Exception:
@@ -236,13 +236,12 @@ if __name__ == "__main__":
     hilo_iq.daemon = True
     hilo_iq.start()
     
-    print("⚡ Bot de Telegram listo y escuchando órdenes sin colisiones...")
+    print("⚡ Bot de Telegram listo y escuchando órdenes...")
     
-    # Bucle de polling blindado contra errores 409
     while True:
         try:
-            # restart_on_change=True rompe hilos viejos duplicados instantáneamente en la API de Telegram
-            bot_telegram.polling(none_stop=True, interval=2, timeout=30, restart_on_change=True)
+            # Añadimos skip_pending_updates=True para que ignore comandos acumulados mientras estuvo apagado
+            bot_telegram.polling(none_stop=True, interval=2, timeout=30, restart_on_change=True, skip_pending_updates=True)
         except Exception as e:
             print(f"🔄 Limpiando colisión / Reiniciando bucle: {e}")
             time.sleep(5)
