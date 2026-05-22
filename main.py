@@ -11,10 +11,11 @@ from flask import Flask
 from credenciales import bot_telegram, conectar_broker, TELEGRAM_ID
 
 # ==============================================================================
-# BASE DE DATOS PERSISTENTE PARA LA EVOLUCIÓN DE LA IA (COLUMNAS EXPANDIDAS)
+# BASE DE DATOS PERSISTENTE PARA LA EVOLUCIÓN DE LA IA (VERSION 4.5 EXPANDIDA)
 # ==============================================================================
 ARCHIVO_HISTORIAL = "historial_operaciones.csv"
 
+# Si el archivo no existe, lo crea con la nueva cabecera de 17 columnas de alta precisión
 if not os.path.exists(ARCHIVO_HISTORIAL):
     with open(ARCHIVO_HISTORIAL, "w", newline="") as f:
         escritor = csv.writer(f)
@@ -22,7 +23,8 @@ if not os.path.exists(ARCHIVO_HISTORIAL):
             "timestamp", "divisa", "hora", "tipo_senal", 
             "precio_entrada", "precio_final", "resultado", 
             "rsi", "atr", "banda_sup", "banda_inf",
-            "ema_200", "macd_line", "macd_signal", "hora_numerica"
+            "ema_200", "macd_line", "macd_signal", 
+            "slowk", "slowd", "adx", "distancia_ema", "hora_numerica"
         ])
 
 # ==============================================================================
@@ -35,16 +37,15 @@ iq_client = None
 def home():
     global iq_client
     if iq_client and iq_client.check_connect():
-        estado = "🟢 IA EVOLUTIVA - GENERANDO HISTORIAL DE APRENDIZAJE EXPANDIDO"
+        estado = "🟢 IA EVOLUTIVA V4.5 - COSECHANDO ARSENAL CUANTITATIVO COMPLETO"
         try: saldo = f"${iq_client.get_balance():,.2f} USD"
         except: saldo = "Cargando..."
     else:
         estado = "❌ PUENTE DESCONECTADO"
         saldo = "$0.00"
     
-    return f"<h2>🧠 Sniper V4 - Modo Aprendizaje Avanzado IA</h2><p><b>Estado:</b> {estado}</p><p><b>Saldo:</b> {saldo}</p>", 200
+    return f"<h2>🧠 Sniper V4.5 - Cosecha Premium IA</h2><p><b>Estado:</b> {estado}</p><p><b>Saldo:</b> {saldo}</p>", 200
 
-# RUTA INTEGRADA CON PARSEO REPARADO PARA GOOGLE COLAB
 @app.route('/descargar-datos-ia')
 def descargar_datos_ia():
     if os.path.exists(ARCHIVO_HISTORIAL):
@@ -61,12 +62,16 @@ def ejecutar_servidor_web():
 # MATEMÁTICAS DE MERCADO (INDICADORES BASE + NUEVOS OJOS DE LA IA)
 # ==============================================================================
 def calcular_indicadores_avanzados(velas):
-    if len(velas) < 20:
-        return 0, 0, 0, 50, 0, 0, 0, 0, 0
+    # Protegemos el sistema pidiendo un mínimo de 250 velas para cálculo estable de EMA200
+    if len(velas) < 250:
+        return 0, 0, 0, 50, 0, 0, 0, 0, 0, 0, 0, 0, 0
     
     cierres = np.array([v['close'] for v in velas], dtype=float)
+    altos = np.array([v['max'] for v in velas], dtype=float)
+    bajos = np.array([v['min'] for v in velas], dtype=float)
+    precio_cierre_actual = moc_cierre = cierres[-1]
     
-    # 1. Indicadores Base (Matemáticas Nativas)
+    # 1. Indicadores Base Matemáticos (Originales del Bot)
     ultimas_20 = cierres[-20:]
     sma_20 = sum(ultimas_20) / 20
     varianza = sum((x - sma_20) ** 2 for x in ultimas_20) / 20
@@ -82,26 +87,36 @@ def calcular_indicadores_avanzados(velas):
     rs = (ganancias / 14) / ((perdidas / 14) + 1e-10)
     rsi = 100 - (100 / (1 + rs))
     
-    altos = [v['max'] for v in velas]
-    bajos = [v['min'] for v in velas]
     tr_tot = 0
     for i in range(len(velas)-14, len(velas)):
         tr_tot += max(altos[i] - bajos[i], abs(altos[i] - cierres[i-1]), abs(bajos[i] - cierres[i-1]))
     atr = tr_tot / 14
         
-    # 2. 🌟 NUEVOS OJOS AVANZADOS (A TRAVÉS DE TA-LIB CON LAS VELAS REALES DE IQ OPTION)
-    # Nota: Usamos un periodo adaptativo menor si el lote de velas es de 30 para evitar valores vacíos
-    ema_200 = round(float(talib.EMA(cierres, timeperiod=min(len(cierres), 200))[-1]), 6)
+    # 2. 🌟 FILTRO DE TENDENCIA MAESTRA (EMA 200)
+    ema_200 = round(float(talib.EMA(cierres, timeperiod=200)[-1]), 6)
     
+    # 3. 🌟 IMPULSO CORREGIDO (MACD ESTÁNDAR CON HISTORIAL COMPLETO)
     macd, macdsignal, _ = talib.MACD(cierres, fastperiod=12, slowperiod=26, signalperiod=9)
     macd_line = round(float(macd[-1]), 6) if not np.isnan(macd[-1]) else 0.0
     macd_sig = round(float(macdsignal[-1]), 6) if not np.isnan(macdsignal[-1]) else 0.0
     
-    # 3. Horario Numérico Profesional
+    # 4. 🌟 NUEVOS OJOS: MOMENTUM DE REVERSIÓN (ESTOCÁSTICO)
+    slowk, slowd = talib.STOCH(altos, bajos, cierres, fastk_period=5, slowk_period=3, slowk_matype=0, slowd_period=3, slowd_matype=0)
+    stoch_k = round(float(slowk[-1]), 2) if not np.isnan(slowk[-1]) else 50.0
+    stoch_d = round(float(slowd[-1]), 2) if not np.isnan(slowd[-1]) else 50.0
+    
+    # 5. 🌟 NUEVOS OJOS: FUERZA DE LA TENDENCIA (ADX)
+    adx_valores = talib.ADX(altos, bajos, cierres, timeperiod=14)
+    adx = round(float(adx_valores[-1]), 2) if not np.isnan(adx_valores[-1]) else 0.0
+    
+    # 6. 🌟 NUEVOS OJOS: EFECTO LIGA (DISTANCIA EN PIPS A LA EMA 200)
+    distancia_ema = round(float(precio_cierre_actual - ema_200), 6)
+    
+    # 7. Horario Numérico Profesional
     ahora = datetime.now()
     hora_numerica = round(ahora.hour + (ahora.minute / 60.0), 2)
     
-    return ema_200, b_sup, b_inf, rsi, atr, macd_line, macd_sig, hora_numerica
+    return b_sup, b_inf, rsi, atr, ema_200, macd_line, macd_sig, stoch_k, stoch_d, adx, distancia_ema, hora_numerica
 
 # ==============================================================================
 # ESCÁNER DE ALIMENTACIÓN: CONEXIÓN REAL A MERCADO + COSECHA EXPANDIDA
@@ -109,10 +124,10 @@ def calcular_indicadores_avanzados(velas):
 def escanear_mercados():
     global iq_client
     divisas = ["EURUSD", "GBPUSD", "EURJPY", "AUDUSD"]
-    print("🧠 Modo Inteligencia Autónoma Activo: Recolectando escenarios reales...")
+    print("🧠 Sniper V4.5 Activo: Cosechando el arsenal cuantitativo completo...")
     
     try:
-        bot_telegram.send_message(TELEGRAM_ID, "🤖 *Súper Cosecha Inteligente Activada*\nEl bot está cazando en IQ Option guardando RSI, ATR, Bandas, EMA 200, MACD y Tiempos de mercado simultáneamente.", parse_mode="Markdown")
+        bot_telegram.send_message(TELEGRAM_ID, "🚀 *Súper Cosecha Inteligente V4.5 Iniciada*\nEl bot está cazando escenarios inyectando RSI, ATR, BB, EMA 200, MACD, Estocástico, ADX y Distancia a la EMA de forma simultánea.", parse_mode="Markdown")
     except:
         pass
 
@@ -120,11 +135,12 @@ def escanear_mercados():
         if iq_client and iq_client.check_connect():
             for divisa in divisas:
                 try:
-                    velas = iq_client.get_candles(divisa, 60, 30, time.time())
-                    if not velas: continue
+                    # CLAVE BRUTAL: Solicitamos 300 velas para que den todos los cálculos matemáticos a la perfección
+                    velas = iq_client.get_candles(divisa, 60, 300, time.time())
+                    if not velas or len(velas) < 250: continue
                     
-                    # Ejecutamos los cálculos con la inyección avanzada
-                    ema_200, b_sup, b_inf, rsi, atr, macd_line, macd_sig, hora_numerica = calcular_indicadores_avanzados(velas)
+                    # Ejecutamos los cálculos cuantitativos con la inyección avanzada
+                    b_sup, b_inf, rsi, atr, ema_200, macd_line, macd_sig, stoch_k, stoch_d, adx, distancia_ema, hora_numerica = calcular_indicadores_avanzados(velas)
                     precio_cierre = velas[-1]['close']
                     
                     senal = None
@@ -134,13 +150,21 @@ def escanear_mercados():
                         senal = "🟢 COMPRA (ESCENARIO IA) 📈"
                     
                     if senal:
-                        mensaje = f"🧠 *ESCENARIO DETECTADO ({divisa})*\n⚡ Tipo: {senal}\n📊 RSI: {round(rsi,1)} | ATR: {round(atr,6)}"
+                        # Formateamos el ADX visualmente para que sepas el estado del mercado en tu cel
+                        estado_tendencia = "Tendencia Fuerte" if adx > 25 else "Mercado Lateral/Sano"
+                        
+                        mensaje = (f"🧠 *ESCENARIO DETECTADO ({divisa})*\n"
+                                   f"⚡ Tipo: {senal}\n"
+                                   f"📊 RSI: {round(rsi,1)} | ATR: {round(atr,6)}\n"
+                                   f"🎯 MACD: {round(macd_line,5)} | ADX: {round(adx,1)} ({estado_tendencia})\n"
+                                   f"🔄 Estocástico K: {round(stoch_k,1)} | D: {round(stoch_d,1)}")
+                        
                         bot_telegram.send_message(TELEGRAM_ID, mensaje, parse_mode="Markdown")
                         
-                        # Mandamos a guardar los datos de forma asíncrona incluyendo la nueva estructura
+                        # Mandamos a guardar los datos de forma asíncrona incluyendo la nueva estructura completa
                         threading.Thread(
                             target=simular_operacion, 
-                            args=(divisa, precio_cierre, senal, rsi, atr, b_sup, b_inf, ema_200, macd_line, macd_sig, hora_numerica),
+                            args=(divisa, precio_cierre, senal, rsi, atr, b_sup, b_inf, ema_200, macd_line, macd_sig, stoch_k, stoch_d, adx, distancia_ema, hora_numerica),
                             daemon=True
                         ).start()
                         
@@ -151,9 +175,9 @@ def escanear_mercados():
             print("🔌 Esperando conexión del broker...")
         time.sleep(15)
 
-def simular_operacion(divisa, precio_entrada, tipo_senal, rsi, atr, banda_sup, banda_inf, ema_200, macd_line, macd_sig, hora_numerica):
+def simular_operacion(divisa, precio_entrada, tipo_senal, rsi, atr, banda_sup, banda_inf, ema_200, macd_line, macd_sig, stoch_k, stoch_d, adx, distancia_ema, hora_numerica):
     global iq_client
-    time.sleep(61) # Esperamos el vencimiento de la vela de 1 minuto
+    time.sleep(61) # Esperamos el vencimiento exacto de la vela de 1 minuto
     try:
         if iq_client and iq_client.check_connect():
             velas = iq_client.get_candles(divisa, 60, 1, time.time())
@@ -170,13 +194,15 @@ def simular_operacion(divisa, precio_entrada, tipo_senal, rsi, atr, banda_sup, b
             resultado = 1 if ganó else 0
             tipo_limpio = "COMPRA" if "COMPRA" in tipo_senal else "VENTA"
             
+            # Escritura limpia en el CSV persistente de las 17 columnas cuantitativas
             with open(ARCHIVO_HISTORIAL, mode="a", newline="") as f:
                 escritor = csv.writer(f)
                 escritor.writerow([
                     timestamp, divisa, hora_registro, tipo_limpio,
                     precio_entrada, precio_final, resultado,
                     round(rsi, 2), round(atr, 6), round(banda_sup, 6), round(banda_inf, 6),
-                    round(ema_200, 6), round(macd_line, 6), round(macd_sig, 6), round(hora_numerica, 2)
+                    round(ema_200, 6), round(macd_line, 6), round(macd_sig, 6),
+                    round(stoch_k, 2), round(stoch_d, 2), round(adx, 2), round(distancia_ema, 6), round(hora_numerica, 2)
                 ])
     except Exception as e:
         print(f"Error en registro evolutivo: {e}")
