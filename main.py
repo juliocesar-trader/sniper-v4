@@ -37,14 +37,14 @@ iq_client = None
 def home():
     global iq_client
     if iq_client and iq_client.check_connect():
-        estado = "🟢 IA EVOLUTIVA V4.5 - COSECHANDO ARSENAL CUANTITATIVO COMPLETO"
+        estado = "🟢 IA EVOLUTIVA V4.5 - COSECHANDO ARSENAL CUANTITATIVO COMPLETO (MODO OTC)"
         try: saldo = f"${iq_client.get_balance():,.2f} USD"
         except: saldo = "Cargando..."
     else:
         estado = "❌ PUENTE DESCONECTADO"
         saldo = "$0.00"
     
-    return f"<h2>🧠 Sniper V4.5 - Cosecha Premium IA</h2><p><b>Estado:</b> {estado}</p><p><b>Saldo:</b> {saldo}</p>", 200
+    return f"<h2>🧠 Sniper V4.5 - Cosecha Premium IA (OTC)</h2><p><b>Estado:</b> {estado}</p><p><b>Saldo:</b> {saldo}</p>", 200
 
 @app.route('/descargar-datos-ia')
 def descargar_datos_ia():
@@ -123,11 +123,12 @@ def calcular_indicadores_avanzados(velas):
 # ==============================================================================
 def escanear_mercados():
     global iq_client
-    divisas = ["EURUSD", "GBPUSD", "EURJPY", "AUDUSD"]
-    print("🧠 Sniper V4.5 Activo: Cosechando el arsenal cuantitativo completo...")
+    # 🛠️ MODIFICACIÓN SÚPER SNIPER: ACTIVACIÓN DE DIVISAS EN MERCADO OTC DE FIN DE SEMANA
+    divisas = ["EURUSD-OTC", "GBPUSD-OTC", "EURJPY-OTC", "AUDUSD-OTC"]
+    print("🧠 Sniper V4.5 Activo: Cosechando el arsenal cuantitativo completo en OTC...")
     
     try:
-        bot_telegram.send_message(TELEGRAM_ID, "🚀 *Súper Cosecha Inteligente V4.5 Iniciada*\nEl bot está cazando escenarios inyectando RSI, ATR, BB, EMA 200, MACD, Estocástico, ADX y Distancia a la EMA de forma simultánea.", parse_mode="Markdown")
+        bot_telegram.send_message(TELEGRAM_ID, "🚀 *Súper Cosecha Inteligente V4.5 Iniciada (Modo OTC)*\nEl bot está cazando escenarios reales de fin de semana inyectando la matriz cuántica completa.", parse_mode="Markdown")
     except:
         pass
 
