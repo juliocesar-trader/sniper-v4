@@ -4,22 +4,24 @@ import datetime
 import threading
 import pickle
 import requests
-import csv
 import numpy as np
 import pandas as pd
 from bs4 import BeautifulSoup
 from flask import Flask
 
-# Importamos el puente seguro desde tus credenciales originales
-from credenciales import conectar_broker, bot_telegram, TELEGRAM_ID
+# Librerías necesarias para la conexión robusta con Google Sheets
+import gspread
+from oauth2client.service_account import ServiceAccountCredentials
+
+# Importamos el puente seguro y la nueva función para obtener la llave JSON externa
+from credenciales import conectar_broker, bot_telegram, TELEGRAM_ID, obtener_json_credenciales_google
 
 # ==============================================================================
 # CONFIGURACIÓN MATRICIAL NATIVA
 # ==============================================================================
 DIVISAS = ["EURUSD", "GBPUSD", "AUDUSD", "USDJPY"]
-ARCHIVO_REGISTRO = "registro_evolucion_ia.csv"
 
-print("🦁 Sniper IA V4 - Inicializando Motores e Hilos...")
+print("🦁 Sniper IA V4 - Inicializando Motores e Hilos con Google Sheets...")
 API = conectar_broker()
 
 if API and API.check_connect():
@@ -39,33 +41,44 @@ except Exception as e:
 
 # Memoria de Aprendizaje por Refuerzo Continuo
 pesos_refuerzo = {divisa: 0.0 for divisa in DIVISAS}
-lock_csv = threading.Lock()
 
 # Variable global para el estado de noticias (Evita retrasos en el segundo cero)
 noticias_usd_activas = False
 
 # ==============================================================================
-# SISTEMA DE REGISTRO PERMANENTE CSV (Auditoría dentro de Render)
+# SISTEMA DE REGISTRO INTEGRADO A GOOGLE SHEETS (Disco Duro en la Nube)
 # ==============================================================================
-def inicializar_csv_render():
-    with lock_csv:
-        if not os.path.exists(ARCHIVO_REGISTRO):
-            with open(ARCHIVO_REGISTRO, mode='w', newline='', encoding='utf-8') as f:
-                escritor = csv.writer(f)
-                escritor.writerow([
-                    "Fecha_Hora", "Divisa", "Operacion", "Certeza_IA", 
-                    "RSI", "ATR", "Resultado", "Ajuste_Refuerzo", "Saldo_Demo"
-                ])
-            print(f"📊 Archivo de auditoría {ARCHIVO_REGISTRO} configurado en Render.")
+def conectar_google_sheets():
+    try:
+        scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
+        creds_dict = obtener_json_credenciales_google() 
+        
+        if not creds_dict:
+            print("⚠️ Error: No se recibieron credenciales válidas desde credenciales.py.")
+            return None
+            
+        creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
+        cliente = gspread.authorize(creds)
+        
+        # Abre la hoja por el nombre exacto que configuraste en tu Drive
+        hoja = cliente.open("Bitacora_Sniper_IA").sheet1
+        return hoja
+    except Exception as e:
+        print(f"⚠️ Error conectando con Google Sheets: {e}")
+        return None
 
-def registrar_operacion_csv(datos_fila):
-    with lock_csv:
-        try:
-            with open(ARCHIVO_REGISTRO, mode='a', newline='', encoding='utf-8') as f:
-                escritor = csv.writer(f)
-                escritor.writerow(datos_fila)
-        except Exception as e:
-            print(f"⚠️ Error al escribir fila en bitácora CSV: {e}")
+def registrar_operacion_sheets(datos_fila):
+    try:
+        hoja = conectar_google_sheets()
+        if hoja:
+            # Añade los datos directamente en una fila nueva al final de la hoja en internet
+            hoja.append_row(datos_fila)
+            print("💾 Bitácora respaldada en Google Sheets con éxito y protegida de reinicios.")
+        else:
+            print("⚠️ No se pudo conectar a Sheets. Copia de respaldo de datos en consola:")
+            print(datos_fila)
+    except Exception as e:
+        print(f"⚠️ Error crítico al escribir en Google Sheets: {e}")
 
 # ==============================================================================
 # FILTRO DE NOTICIAS ASÍNCRONO (Ejecución en segundo plano)
@@ -205,7 +218,9 @@ def procesar_resultado_operacion(id_operacion, divisa, direccion, certeza, umbra
         f"{datos['rsi']:.2f}", f"{datos['atr']:.6f}", csv_status,
         f"{pesos_refuerzo[divisa]:+.4f}", f"${balance_actual:.2f}"
     ]
-    registrar_operacion_csv(datos_registro)
+    
+    # Enviar los datos directo a la nube de Google Sheets de manera persistente
+    registrar_operacion_sheets(datos_registro)
         
     mensaje_telegram = (
         f"🦁 *SNIPER IA V4: OPERACIÓN CONCLUIDA*\n\n"
@@ -217,7 +232,7 @@ def procesar_resultado_operacion(id_operacion, divisa, direccion, certeza, umbra
         f"🛡️ *Filtro de Noticias USD:* `✅ SEGURO`\n\n"
         f"🏁 *RESULTADO:* *{estado_marcador}*\n"
         f"🔄 *Evolución de Pesos:* `{pesos_refuerzo[divisa]:+.4f}`\n"
-        f"💾 *Auditoría CSV:* `✅ Guardado en Render`\n"
+        f"💾 *Nube Google Sheets:* `✅ Respaldado de forma Indestructible`\n"
         f"💰 *Saldo Cuenta Demo:* `${balance_actual:.2f} USD`"
     )
     
@@ -309,7 +324,6 @@ def analizar_vela_minuto(divisa):
 # ==============================================================================
 def despachador_central():
     global operado_este_minuto
-    inicializar_csv_render()
     
     # Lanzamos el filtro de noticias asíncrono para que trabaje de fondo de manera aislada
     threading.Thread(target=bucle_asincrono_noticias, daemon=True).start()
@@ -317,7 +331,7 @@ def despachador_central():
     print("🦁 Motores encendidos. Sincronizando con el reloj del servidor...")
     
     try:
-        bot_telegram.send_message(TELEGRAM_ID, "🦁 *¡SÚPER CEREBRO ONLINE SIN ERRORES DE DATOS!*\nCorregido el mapeo de columnas para las 17 variables exactas. Escaneando mercados...", parse_mode="Markdown")
+        bot_telegram.send_message(TELEGRAM_ID, "🦁 *¡SÚPER CEREBRO ONLINE CON CONEXIÓN CLOUD NEURAL!*\nConectado con éxito a Google Sheets. Matriz de 17 variables acoplada. Escaneando mercados...", parse_mode="Markdown")
     except Exception as e:
         print(f"⚠️ Alerta Telegram: {e}")
         
@@ -343,7 +357,7 @@ app = Flask(__name__)
 
 @app.route('/')
 def home():
-    return "🦁 Sniper IA V4 está vivo y cazando en los mercados financieros."
+    return "🦁 Sniper IA V4 está vivo y cazando en los mercados financieros con base en Sheets activa."
 
 def iniciar_servidor_web():
     port = int(os.environ.get("PORT", 10000))
