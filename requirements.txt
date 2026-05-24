@@ -1,10 +1,8 @@
-PyTelegramBotAPI==4.12.0
-flask==3.0.0
-werkzeug==3.0.1
-git+https://github.com/Lu-Yi-Hsun/iqoptionapi.git
+IQOptionAPI
 pandas
 numpy
-TA-Lib
-scikit-learn
-beautifulsoup4
 requests
+beautifulsoup4
+flask
+gspread
+oauth2client
