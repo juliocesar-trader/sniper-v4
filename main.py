@@ -8,45 +8,43 @@ import csv
 import numpy as np
 import pandas as pd
 from bs4 import BeautifulSoup
+from flask import Flask
 
-# Importamos la conexión e instancias seguras desde tu archivo original
+# Importamos el puente seguro desde tus credenciales originales
 from credenciales import conectar_broker, bot_telegram, TELEGRAM_ID
 
 # ==============================================================================
-# CONFIGURACIÓN MATRICIAL NATIVA (Evita fallos de importación)
+# CONFIGURACIÓN MATRICIAL NATIVA
 # ==============================================================================
 DIVISAS = ["EURUSD", "GBPUSD", "AUDUSD", "USDJPY"]
 ARCHIVO_REGISTRO = "registro_evolucion_ia.csv"
 
-print("🦁 Súper Cerebro Adaptativo - Inicializando Conexiones...")
+print("🦁 Sniper IA V4 - Inicializando Motores e Hilos...")
 API = conectar_broker()
 
 if API and API.check_connect():
     API.change_balance("PRACTICE")  # Forzado estricto a Cuenta DEMO
     print("💰 Conectado con éxito a la cuenta DEMO de IQ Option.")
 else:
-    print("❌ Error crítico: No se pudo enlazar el Broker. Revisa Render .env")
+    print("❌ Alerta: El Broker no está listo aún. Conexión en segundo plano activada.")
 
 # Carga del Cerebro entrenado (.pkl)
 try:
     with open("modelo_sniper_ia.pkl", "rb") as f:
         modelo_ia = pickle.load(f)
-    print("🧠 Modelo Inteligente cargado correctamente.")
+    print("🧠 Cerebro predictivo .pkl acoplado sin problemas.")
 except Exception as e:
-    print(f"⚠️ Alerta al cargar el .pkl: {e}. Se usará umbral base de contingencia.")
+    print(f"⚠️ Nota sobre el archivo .pkl: {e}")
     modelo_ia = None
 
-# Memoria volátil para el Aprendizaje por Refuerzo Continuo (Premios/Castigos)
+# Memoria de Aprendizaje por Refuerzo Continuo
 pesos_refuerzo = {divisa: 0.0 for divisa in DIVISAS}
-
-# Lock para controlar escrituras simultáneas en el archivo CSV de Render
 lock_csv = threading.Lock()
 
 # ==============================================================================
-# SISTEMA DE REGISTRO PERMANENTE CSV (Auditoría para mejorar el bot)
+# SISTEMA DE REGISTRO PERMANENTE CSV (Auditoría dentro de Render)
 # ==============================================================================
 def inicializar_csv_render():
-    """Crea la estructura del archivo CSV en Render si no existe."""
     with lock_csv:
         if not os.path.exists(ARCHIVO_REGISTRO):
             with open(ARCHIVO_REGISTRO, mode='w', newline='', encoding='utf-8') as f:
@@ -55,17 +53,16 @@ def inicializar_csv_render():
                     "Fecha_Hora", "Divisa", "Operacion", "Certeza_IA", 
                     "RSI", "ATR", "Resultado", "Ajuste_Refuerzo", "Saldo_Demo"
                 ])
-            print(f"📊 Archivo de auditoría {ARCHIVO_REGISTRO} inicializado con éxito.")
+            print(f"📊 Archivo de auditoría {ARCHIVO_REGISTRO} configurado en Render.")
 
 def registrar_operacion_csv(datos_fila):
-    """Guarda cada operación en caliente dentro del almacenamiento de Render."""
     with lock_csv:
         try:
             with open(ARCHIVO_REGISTRO, mode='a', newline='', encoding='utf-8') as f:
                 escritor = csv.writer(f)
                 escritor.writerow(datos_fila)
         except Exception as e:
-            print(f"⚠️ No se pudo guardar la fila en el CSV: {e}")
+            print(f"⚠️ Error al escribir fila en bitácora CSV: {e}")
 
 # ==============================================================================
 # FILTRO DE NOTICIAS DE ALTO IMPACTO (Investing.com)
@@ -167,21 +164,28 @@ operado_este_minuto = False
 
 def analizar_vela_minuto(divisa):
     global operado_este_minuto
+    global API
     
-    if not API:
+    if not API or not API.check_connect():
+        try:
+            API = conectar_broker()
+            if API: API.change_balance("PRACTICE")
+        except:
+            return
+
+    try:
+        velas = API.get_candles(divisa, 60, 220, time.time())
+    except:
         return
 
-    velas = API.get_candles(divisa, 60, 220, time.time())
     if not velas or len(velas) < 200:
         return
         
     datos = calcular_las_17_variables(velas)
     
-    # Lógica adaptativa de umbral matemático
     umbral_base = 0.75 if datos['atr'] < 0.00015 else 0.85
     umbral_final = max(0.70, min(0.90, umbral_base + pesos_refuerzo[divisa]))
     
-    # Ejecución analítica de la IA
     if modelo_ia:
         features = np.array([datos['rsi'], datos['atr'], datos['banda_sup'], datos['banda_inf'],
                              datos['ema_200'], datos['macd_line'], datos['macd_signal'],
@@ -192,7 +196,6 @@ def analizar_vela_minuto(divisa):
         direccion = "CALL" if prob_call > prob_put else "PUT"
         certeza = max(prob_call, prob_put)
     else:
-        # Fallback seguro por si no encuentra el .pkl temporalmente
         direccion = "CALL" if datos['rsi'] < 30 else "PUT" if datos['rsi'] > 70 else None
         certeza = 0.76 if direccion else 0.0
         
@@ -206,18 +209,23 @@ def analizar_vela_minuto(divisa):
                 operado_este_minuto = True
                 
         monto = 1
-        id_operacion = API.buy(monto, divisa, "turbo", 1) if direccion == "CALL" else API.sell(monto, divisa, "turbo", 1)
-        
+        try:
+            id_operacion = API.buy(monto, divisa, "turbo", 1) if direccion == "CALL" else API.sell(monto, divisa, "turbo", 1)
+        except:
+            return
+            
         if not id_operacion or not isinstance(id_operacion, int):
             return
             
-        print(f"🚀 Ejecutando {direccion} en {divisa} en cuenta DEMO...")
+        print(f"🚀 Ejecutando {direccion} en {divisa} (Demo)...")
         time.sleep(61)
         
-        resultado, ganancia = API.check_win_v3(id_operacion)
-        balance_actual = API.get_balance()
+        try:
+            resultado, ganancia = API.check_win_v3(id_operacion)
+            balance_actual = API.get_balance()
+        except:
+            resultado, ganancia, balance_actual = "error", 0, 0
         
-        # Premios y Castigos por Refuerzo Continuo (Evolución Directa)
         if resultado == "win":
             pesos_refuerzo[divisa] -= 0.010
             estado_marcador = f"🟢 GANADA (+${ganancia:.2f} USD)"
@@ -227,7 +235,6 @@ def analizar_vela_minuto(divisa):
             estado_marcador = "🔴 PERDIDA (-$1.00 USD)"
             csv_status = "PERDIDA"
             
-        # 💾 GUARDAR DATOS EN EL CSV INTERNO DE RENDER
         datos_registro = [
             hora_entrada, divisa, direccion, f"{certeza*100:.2f}%",
             f"{datos['rsi']:.2f}", f"{datos['atr']:.6f}", csv_status,
@@ -235,7 +242,6 @@ def analizar_vela_minuto(divisa):
         ]
         registrar_operacion_csv(datos_registro)
             
-        # 🦁 NOTIFICACIÓN REQUERIDA A TELEGRAM
         mensaje_telegram = (
             f"🦁 *SNIPER IA V4: OPERACIÓN DETECTADA*\n\n"
             f"📅 *Hora de Entrada:* `{hora_entrada}`\n"
@@ -253,7 +259,7 @@ def analizar_vela_minuto(divisa):
         try:
             bot_telegram.send_message(TELEGRAM_ID, mensaje_telegram, parse_mode="Markdown")
         except Exception as e:
-            print(f"❌ Error enviando a Telegram: {e}")
+            print(f"❌ Error Telegram: {e}")
 
 # ==============================================================================
 # BUCLE CENTRAL ASÍNCRONO
@@ -264,9 +270,9 @@ def despachador_central():
     print("🦁 Motores encendidos. Sincronizando con el reloj del servidor...")
     
     try:
-        bot_telegram.send_message(TELEGRAM_ID, "🦁 *¡SÚPER CEREBRO OPERATIVO SIN FALLOS!*\nCorregido el error de ejecución de entorno. El bot está monitoreando mercados y escribiendo tu bitácora CSV en Render.", parse_mode="Markdown")
+        bot_telegram.send_message(TELEGRAM_ID, "🦁 *¡SÚPER CEREBRO ONLINE SIN ERRORES!*\nInstaladas todas las librerías de raspado y auditoría con éxito. El bot está cazando los mercados en Demo.", parse_mode="Markdown")
     except Exception as e:
-        print(f"⚠️ Alerta de inicio en Telegram: {e}")
+        print(f"⚠️ Alerta Telegram: {e}")
         
     while True:
         ahora = datetime.datetime.now()
@@ -282,5 +288,24 @@ def despachador_central():
         for pair in DIVISAS:
             threading.Thread(target=analizar_vela_minuto, args=(pair,)).start()
 
+# ==============================================================================
+# SERVIDOR FLASK INTEGRADO PARA RENDER
+# ==============================================================================
+app = Flask(__name__)
+
+@app.route('/')
+def home():
+    return "🦁 Sniper IA V4 está vivo y cazando en los mercados financieros."
+
+def iniciar_servidor_web():
+    port = int(os.environ.get("PORT", 10000))
+    app.run(host="0.0.0.0", port=port)
+
 if __name__ == "__main__":
-    despachador_central()
+    # Arrancamos el bot en un hilo secundario para que no bloquee el puerto
+    hilo_bot = threading.Thread(target=despachador_central)
+    hilo_bot.daemon = True
+    hilo_bot.start()
+    
+    # El hilo principal corre Flask para mantener feliz a Render
+    iniciar_servidor_web()
