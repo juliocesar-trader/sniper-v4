@@ -105,10 +105,19 @@ def verificar_noticias_usd():
     return False
 
 # ==============================================================================
-# EXTRACCIÓN Y CÁLCULO DE INDICADORES TÉCNICOS
+# EXTRACCIÓN Y CÁLCULO DE INDICADORES TÉCNICOS (Mapeo Blindado contra KeyErrors)
 # ==============================================================================
 def calcular_las_17_variables(velas):
     df = pd.DataFrame(velas)
+    
+    # 🛡️ MAPEO CRÍTICO DE COLUMNAS (Evita fallos por variaciones del broker)
+    columnas_map = {
+        'max': 'high', 'min': 'low', 'close': 'close', 'open': 'open',
+        'high': 'high', 'low': 'low'
+    }
+    df = df.rename(columns=columnas_map)
+    
+    # Convertir a float de forma segura
     df['close'] = df['close'].astype(float)
     df['high'] = df['high'].astype(float)
     df['low'] = df['low'].astype(float)
@@ -181,8 +190,12 @@ def analizar_vela_minuto(divisa):
     if not velas or len(velas) < 200:
         return
         
-    datos = calcular_las_17_variables(velas)
-    
+    try:
+        datos = calcular_las_17_variables(velas)
+    except Exception as e:
+        print(f"⚠️ Error calculando métricas para {divisa}: {e}")
+        return
+        
     umbral_base = 0.75 if datos['atr'] < 0.00015 else 0.85
     umbral_final = max(0.70, min(0.90, umbral_base + pesos_refuerzo[divisa]))
     
@@ -270,7 +283,7 @@ def despachador_central():
     print("🦁 Motores encendidos. Sincronizando con el reloj del servidor...")
     
     try:
-        bot_telegram.send_message(TELEGRAM_ID, "🦁 *¡SÚPER CEREBRO ONLINE SIN ERRORES!*\nInstaladas todas las librerías de raspado y auditoría con éxito. El bot está cazando los mercados en Demo.", parse_mode="Markdown")
+        bot_telegram.send_message(TELEGRAM_ID, "🦁 *¡SÚPER CEREBRO ONLINE SIN ERRORES DE DATOS!*\nCorregido el mapeo de columnas para el cálculo de indicadores. Escaneando mercados...", parse_mode="Markdown")
     except Exception as e:
         print(f"⚠️ Alerta Telegram: {e}")
         
@@ -302,10 +315,8 @@ def iniciar_servidor_web():
     app.run(host="0.0.0.0", port=port)
 
 if __name__ == "__main__":
-    # Arrancamos el bot en un hilo secundario para que no bloquee el puerto
     hilo_bot = threading.Thread(target=despachador_central)
     hilo_bot.daemon = True
     hilo_bot.start()
     
-    # El hilo principal corre Flask para mantener feliz a Render
     iniciar_servidor_web()
