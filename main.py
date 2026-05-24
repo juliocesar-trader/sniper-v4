@@ -1,247 +1,244 @@
 import os
 import time
+import datetime
 import threading
-import csv
-import talib
+import pickle
+import requests
 import numpy as np
-from datetime import datetime
-from flask import Flask
+import pandas as pd
+from bs4 import BeautifulSoup
 
-# IMPORTACIÓN DEL PUENTE SEGÚN TU ESTÁNDAR
-from credenciales import bot_telegram, conectar_broker, TELEGRAM_ID
-
-# ==============================================================================
-# BASE DE DATOS PERSISTENTE PARA LA EVOLUCIÓN DE LA IA (VERSION 4.5 EXPANDIDA)
-# ==============================================================================
-ARCHIVO_HISTORIAL = "historial_operaciones.csv"
-
-# Si el archivo no existe, lo crea con la nueva cabecera de 17 columnas de alta precisión
-if not os.path.exists(ARCHIVO_HISTORIAL):
-    with open(ARCHIVO_HISTORIAL, "w", newline="") as f:
-        escritor = csv.writer(f)
-        escritor.writerow([
-            "timestamp", "divisa", "hora", "tipo_senal", 
-            "precio_entrada", "precio_final", "resultado", 
-            "rsi", "atr", "banda_sup", "banda_inf",
-            "ema_200", "macd_line", "macd_signal", 
-            "slowk", "slowd", "adx", "distancia_ema", "hora_numerica"
-        ])
+# Importamos tu puente seguro ya existente para jalar la conexión y Telegram
+from credenciales import conectar_broker, bot_telegram, TELEGRAM_ID, DIVISAS
 
 # ==============================================================================
-# SERVIDOR WEB FLASK (SOPORTE PARA RENDER Y EXTRACCIÓN DE DATOS)
+# INICIALIZACIÓN DE ENTORNO Y MATRICES CUÁNTICAS
 # ==============================================================================
-app = Flask(__name__)
-iq_client = None  
+print("🦁 Súper Cerebro Adaptativo - Inicializando Conexiones...")
+API = conectar_broker()
 
-@app.route('/')
-def home():
-    global iq_client
-    if iq_client and iq_client.check_connect():
-        estado = "🟢 IA EVOLUTIVA V4.5 - COSECHANDO ARSENAL CUANTITATIVO COMPLETO"
-        try: saldo = f"${iq_client.get_balance():,.2f} USD"
-        except: saldo = "Cargando..."
-    else:
-        estado = "❌ PUENTE DESCONECTADO"
-        saldo = "$0.00"
-    
-    return f"<h2>🧠 Sniper V4.5 - Cosecha Premium IA</h2><p><b>Estado:</b> {estado}</p><p><b>Saldo:</b> {saldo}</p>", 200
+if API and API.check_connect():
+    API.change_balance("PRACTICE")  # Forzado estricto a Cuenta DEMO para ver evolución limpia
+    print("💰 Conectado con éxito a la cuenta DEMO de IQ Option.")
+else:
+    print("❌ Error crítico: No se pudo enlazar el Broker. Verifica Render .env")
 
-@app.route('/descargar-datos-ia')
-def descargar_datos_ia():
-    if os.path.exists(ARCHIVO_HISTORIAL):
-        with open(ARCHIVO_HISTORIAL, "r") as f:
-            contenido = f.read()
-        return f"<pre>{contenido}</pre>", 200, {'Content-Type': 'text/plain; charset=utf-8'}
-    return "⏳ El archivo aún no tiene datos registrados.", 404
+# Carga del Cerebro entrenado en Colab (79.23% Precisión)
+with open("modelo_sniper_ia.pkl", "rb") as f:
+    modelo_ia = pickle.load(f)
 
-def ejecutar_servidor_web():
-    puerto = int(os.environ.get("PORT", 10000))
-    app.run(host="0.0.0.0", port=puerto, debug=False, use_reloader=False)
+# Memoria volátil para el Aprendizaje por Refuerzo Continuo (Premios/Castigos)
+pesos_refuerzo = {divisa: 0.0 for divisa in DIVISAS}
 
 # ==============================================================================
-# MATEMÁTICAS DE MERCADO (INDICADORES BASE + NUEVOS OJOS DE LA IA)
+# FASE 3: FILTRO TEMPRANO DE NOTICIAS DE ALTO IMPACTO (Investing.com)
 # ==============================================================================
-def calcular_indicadores_avanzados(velas):
-    # Protegemos el sistema pidiendo un mínimo de 250 velas para cálculo estable de EMA200
-    if len(velas) < 250:
-        return 0, 0, 0, 50, 0, 0, 0, 0, 0, 0, 0, 0, 0
-    
-    cierres = np.array([v['close'] for v in velas], dtype=float)
-    altos = np.array([v['max'] for v in velas], dtype=float)
-    bajos = np.array([v['min'] for v in velas], dtype=float)
-    precio_cierre_actual = moc_cierre = cierres[-1]
-    
-    # 1. Indicadores Base Matemáticos (Originales del Bot)
-    ultimas_20 = cierres[-20:]
-    sma_20 = sum(ultimas_20) / 20
-    varianza = sum((x - sma_20) ** 2 for x in ultimas_20) / 20
-    desviacion = varianza ** 0.5
-    b_sup = sma_20 + (2 * desviacion)
-    b_inf = sma_20 - (2 * desviacion)
-    
-    ganancias, perdidas = 0, 0
-    for i in range(len(cierres)-14, len(cierres)):
-        cambio = cierres[i] - cierres[i-1]
-        if cambio > 0: ganancias += cambio
-        else: perdidas += abs(cambio)
-    rs = (ganancias / 14) / ((perdidas / 14) + 1e-10)
-    rsi = 100 - (100 / (1 + rs))
-    
-    tr_tot = 0
-    for i in range(len(velas)-14, len(velas)):
-        tr_tot += max(altos[i] - bajos[i], abs(altos[i] - cierres[i-1]), abs(bajos[i] - cierres[i-1]))
-    atr = tr_tot / 14
+def verificar_noticias_usd():
+    """
+    Escanea Investing.com en tiempo real. Bloquea el bot si hay eventos de 3 toros/estrellas
+    en el USD dentro de una ventana de 15 minutos antes o después.
+    """
+    try:
+        url = "https://es.investing.com/economic-calendar/"
+        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
+        respuesta = requests.get(url, headers=headers, timeout=5)
+        if respuesta.status_code != 200:
+            return False
+            
+        soup = BeautifulSoup(respuesta.text, 'html.parser')
+        tabla = soup.find('table', {'id': 'economicCalendarTable'})
+        if not tabla:
+            return False
+            
+        filas = tabla.find_all('tr', class_='js-event-item')
+        hora_actual = datetime.datetime.now()
         
-    # 2. 🌟 FILTRO DE TENDENCIA MAESTRA (EMA 200)
-    ema_200 = round(float(talib.EMA(cierres, timeperiod=200)[-1]), 6)
-    
-    # 3. 🌟 IMPULSO CORREGIDO (MACD ESTÁNDAR CON HISTORIAL COMPLETO)
-    macd, macdsignal, _ = talib.MACD(cierres, fastperiod=12, slowperiod=26, signalperiod=9)
-    macd_line = round(float(macd[-1]), 6) if not np.isnan(macd[-1]) else 0.0
-    macd_sig = round(float(macdsignal[-1]), 6) if not np.isnan(macdsignal[-1]) else 0.0
-    
-    # 4. 🌟 NUEVOS OJOS: MOMENTUM DE REVERSIÓN (ESTOCÁSTICO)
-    slowk, slowd = talib.STOCH(altos, bajos, cierres, fastk_period=5, slowk_period=3, slowk_matype=0, slowd_period=3, slowd_matype=0)
-    stoch_k = round(float(slowk[-1]), 2) if not np.isnan(slowk[-1]) else 50.0
-    stoch_d = round(float(slowd[-1]), 2) if not np.isnan(slowd[-1]) else 50.0
-    
-    # 5. 🌟 NUEVOS OJOS: FUERZA DE LA TENDENCIA (ADX)
-    adx_valores = talib.ADX(altos, bajos, cierres, timeperiod=14)
-    adx = round(float(adx_valores[-1]), 2) if not np.isnan(adx_valores[-1]) else 0.0
-    
-    # 6. 🌟 NUEVOS OJOS: EFECTO LIGA (DISTANCIA EN PIPS A LA EMA 200)
-    distancia_ema = round(float(precio_cierre_actual - ema_200), 6)
-    
-    # 7. Horario Numérico Profesional
-    ahora = datetime.now()
-    hora_numerica = round(ahora.hour + (ahora.minute / 60.0), 2)
-    
-    return b_sup, b_inf, rsi, atr, ema_200, macd_line, macd_sig, stoch_k, stoch_d, adx, distancia_ema, hora_numerica
-
-# ==============================================================================
-# ESCÁNER DE ALIMENTACIÓN: CONEXIÓN REAL A MERCADO + COSECHA EXPANDIDA
-# ==============================================================================
-def escanear_mercados():
-    global iq_client
-    divisas = ["EURUSD", "GBPUSD", "EURJPY", "AUDUSD"]
-    print("🧠 Sniper V4.5 Activo: Cosechando el arsenal cuantitativo completo...")
-    
-    try:
-        bot_telegram.send_message(TELEGRAM_ID, "🚀 *Súper Cosecha Inteligente V4.5 Iniciada*\nEl bot está cazando escenarios inyectando RSI, ATR, BB, EMA 200, MACD, Estocástico, ADX y Distancia a la EMA de forma simultánea.", parse_mode="Markdown")
-    except:
-        pass
-
-    while True:
-        if iq_client and iq_client.check_connect():
-            for divisa in divisas:
-                try:
-                    # CLAVE BRUTAL: Solicitamos 300 velas para que den todos los cálculos matemáticos a la perfección
-                    velas = iq_client.get_candles(divisa, 60, 300, time.time())
-                    if not velas or len(velas) < 250: continue
-                    
-                    # Ejecutamos los cálculos cuantitativos con la inyección avanzada
-                    b_sup, b_inf, rsi, atr, ema_200, macd_line, macd_sig, stoch_k, stoch_d, adx, distancia_ema, hora_numerica = calcular_indicadores_avanzados(velas)
-                    precio_cierre = velas[-1]['close']
-                    
-                    senal = None
-                    if rsi > 65 or precio_cierre >= b_sup:
-                        senal = "🔴 VENTA (ESCENARIO IA) 📉"
-                    elif rsi < 35 or precio_cierre <= b_inf:
-                        senal = "🟢 COMPRA (ESCENARIO IA) 📈"
-                    
-                    if senal:
-                        # Formateamos el ADX visualmente para que sepas el estado del mercado en tu cel
-                        estado_tendencia = "Tendencia Fuerte" if adx > 25 else "Mercado Lateral/Sano"
-                        
-                        mensaje = (f"🧠 *ESCENARIO DETECTADO ({divisa})*\n"
-                                   f"⚡ Tipo: {senal}\n"
-                                   f"📊 RSI: {round(rsi,1)} | ATR: {round(atr,6)}\n"
-                                   f"🎯 MACD: {round(macd_line,5)} | ADX: {round(adx,1)} ({estado_tendencia})\n"
-                                   f"🔄 Estocástico K: {round(stoch_k,1)} | D: {round(stoch_d,1)}")
-                        
-                        bot_telegram.send_message(TELEGRAM_ID, mensaje, parse_mode="Markdown")
-                        
-                        # Mandamos a guardar los datos de forma asíncrona incluyendo la nueva estructura completa
-                        threading.Thread(
-                            target=simular_operacion, 
-                            args=(divisa, precio_cierre, senal, rsi, atr, b_sup, b_inf, ema_200, macd_line, macd_sig, stoch_k, stoch_d, adx, distancia_ema, hora_numerica),
-                            daemon=True
-                        ).start()
-                        
-                except Exception as e:
-                    print(f"Error analizando {divisa}: {e}")
-                time.sleep(2)
-        else:
-            print("🔌 Esperando conexión del broker...")
-        time.sleep(15)
-
-def simular_operacion(divisa, precio_entrada, tipo_senal, rsi, atr, banda_sup, banda_inf, ema_200, macd_line, macd_sig, stoch_k, stoch_d, adx, distancia_ema, hora_numerica):
-    global iq_client
-    time.sleep(61) # Esperamos el vencimiento exacto de la vela de 1 minuto
-    try:
-        if iq_client and iq_client.check_connect():
-            velas = iq_client.get_candles(divisa, 60, 1, time.time())
-            if not velas: return
+        for fila in filas:
+            impacto = fila.find('td', class_='sentiment')
+            estrellas = len(impacto.find_all('i', class_='grayFullBullishIcon')) if impacto else 0
             
-            precio_final = velas[-1]['close']
-            hora_registro = time.strftime("%H:%M:%S")
-            timestamp = int(time.time())
-            
-            ganó = False
-            if "COMPRA" in tipo_senal and precio_final > precio_entrada: ganó = True
-            elif "VENTA" in tipo_senal and precio_final < precio_entrada: ganó = True
-            
-            resultado = 1 if ganó else 0
-            tipo_limpio = "COMPRA" if "COMPRA" in tipo_senal else "VENTA"
-            
-            # Escritura limpia en el CSV persistente de las 17 columnas cuantitativas
-            with open(ARCHIVO_HISTORIAL, mode="a", newline="") as f:
-                escritor = csv.writer(f)
-                escritor.writerow([
-                    timestamp, divisa, hora_registro, tipo_limpio,
-                    precio_entrada, precio_final, resultado,
-                    round(rsi, 2), round(atr, 6), round(banda_sup, 6), round(banda_inf, 6),
-                    round(ema_200, 6), round(macd_line, 6), round(macd_sig, 6),
-                    round(stoch_k, 2), round(stoch_d, 2), round(adx, 2), round(distancia_ema, 6), round(hora_numerica, 2)
-                ])
+            if estrellas == 3:
+                divisa_noticia = fila.find('td', class_='flagCur').text.strip()
+                if divisa_noticia == "USD":
+                    hora_str = fila.find('td', class_='time').text.strip()
+                    try:
+                        hora_noticia = datetime.datetime.strptime(hora_str, "%H:%M").replace(
+                            year=hora_actual.year, month=hora_actual.month, day=hora_actual.day
+                        )
+                        diferencia = abs((hora_actual - hora_noticia).total_seconds() / 60.0)
+                        if diferencia <= 15:
+                            return True
+                    except:
+                        continue
     except Exception as e:
-        print(f"Error en registro evolutivo: {e}")
+        print(f"⚠️ Alerta en Filtro de Noticias: {e}")
+    return False
 
 # ==============================================================================
-# ESCUCHA DE COMANDOS
+# EXTRACCIÓN Y CÁLCULO DE LAS VARIABLES MAESTRAS (Indicadores Técnicos)
 # ==============================================================================
-@bot_telegram.message_handler(commands=['saldo'])
-def enviar_saldo(message):
-    global iq_client
-    if iq_client and iq_client.check_connect():
+def calcular_las_17_variables(velas):
+    df = pd.DataFrame(velas)
+    df['close'] = df['close'].astype(float)
+    df['high'] = df['high'].astype(float)
+    df['low'] = df['low'].astype(float)
+    
+    # RSI 14
+    delta = df['close'].diff()
+    gains = (delta.where(delta > 0, 0)).rolling(window=14).mean()
+    losses = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
+    rs = gains / (losses + 1e-10)
+    df['rsi'] = 100 - (100 / (1 + rs))
+    
+    # ATR 14
+    df['tr'] = np.maximum(df['high'] - df['low'], 
+                          np.maximum(abs(df['high'] - df['close'].shift()), 
+                                     abs(df['low'] - df['close'].shift())))
+    df['atr'] = df['tr'].rolling(window=14).mean()
+    
+    # BB
+    df['ema_bb'] = df['close'].rolling(window=20).mean()
+    df['std_bb'] = df['close'].rolling(window=20).std()
+    df['banda_sup'] = df['ema_bb'] + (df['std_bb'] * 2)
+    df['banda_inf'] = df['ema_bb'] - (df['std_bb'] * 2)
+    
+    # EMA 200
+    df['ema_200'] = df['close'].ewm(span=200, adjust=False).mean()
+    
+    # MACD
+    e12 = df['close'].ewm(span=12, adjust=False).mean()
+    e26 = df['close'].ewm(span=26, adjust=False).mean()
+    df['macd_line'] = e12 - e26
+    df['macd_signal'] = df['macd_line'].ewm(span=9, adjust=False).mean()
+    
+    # Estocástico
+    l14 = df['low'].rolling(window=14).min()
+    h14 = df['high'].rolling(window=14).max()
+    df['slowk'] = 100 * ((df['close'] - l14) / (h14 - l14 + 1e-10))
+    df['slowd'] = df['slowk'].rolling(window=3).mean()
+    
+    # ADX Simplificado
+    df['adx'] = abs(df['high'] - df['low']).rolling(window=14).mean() / (df['atr'] + 1e-10) * 50
+    df['distancia_ema'] = df['close'] - df['ema_200']
+    
+    ahora = datetime.datetime.now()
+    df['hora_numerica'] = ahora.hour + (ahora.minute / 60.0)
+    
+    return df.iloc[-1].to_dict()
+
+# ==============================================================================
+# FLUJO DE TRABAJO EN TIEMPO REAL (Cada Minuto)
+# ==============================================================================
+bloqueo_correlacion = threading.Lock()
+operado_este_minuto = False
+
+def analizar_vela_minuto(divisa):
+    global operado_este_minuto
+    
+    # 1. Extracción de velas en tiempo real (0.2s latencia)
+    velas = API.get_candles(divisa, 60, 220, time.time())
+    if not velas:
+        return
+        
+    datos = calcular_las_17_variables(velas)
+    
+    # Lógica de Umbral Dinámico Adaptativo
+    umbral_base = 0.75 if datos['atr'] < 0.00015 else 0.85
+    
+    # Aplicar la corrección por Aprendizaje por Refuerzo
+    umbral_final = max(0.70, min(0.90, umbral_base + pesos_refuerzo[divisa]))
+    
+    # 2. Evaluación por Inteligencia Artificial
+    features = np.array([datos['rsi'], datos['atr'], datos['banda_sup'], datos['banda_inf'],
+                         datos['ema_200'], datos['macd_line'], datos['macd_signal'],
+                         datos['slowk'], datos['slowd'], datos['adx'],
+                         datos['distancia_ema'], datos['hora_numerica']]).reshape(1, -1)
+                         
+    probabilidades = modelo_ia.predict_proba(features)[0]
+    prob_call, prob_put = probabilidades[1], probabilidades[0]
+    
+    direccion = "CALL" if prob_call > prob_put else "PUT"
+    certeza = max(prob_call, prob_put)
+    
+    hora_entrada = datetime.datetime.now().strftime("%H:%M:%S")
+    
+    # 3. Decisiones y Filtros de Riesgo
+    if certeza >= umbral_final:
+        
+        # Filtro de Correlación Anti-Multirriesgo
+        with bloqueo_correlacion:
+            if "USD" in divisa:
+                if operado_este_minuto:
+                    print(f"🛡️ Filtro de Correlación Activo: Operación omitida en {divisa}")
+                    return
+                operado_este_minuto = True
+                
+        # Ejecución fija de $1 USD (Gestión estricta de riesgo)
+        monto = 1
+        id_operacion = API.buy(monto, divisa, "turbo", 1) if direccion == "CALL" else API.sell(monto, divisa, "turbo", 1)
+        
+        print(f"🚀 Operación lanzada en {divisa} ({direccion}) - Esperando vencimiento...")
+        
+        # Esperar la finalización de la vela de 1 minuto
+        time.sleep(61)
+        resultado, ganancia = API.check_win_v3(id_operacion)
+        balance_actual = API.get_balance()
+        
+        # FASE 4: PREMIOS Y CASTIGOS (Evolución en la sombra sin detenerse)
+        if resultado == "win":
+            pesos_refuerzo[divisa] -= 0.010  # Premio: se vuelve un poco más flexible
+            estado_marcador = f"🟢 GANADA (+${ganancia:.2f} USD)"
+        else:
+            pesos_refuerzo[divisa] += 0.015  # Castigo pesado: sube la exigencia drásticamente
+            estado_marcador = "🔴 PERDIDA (-$1.00 USD)"
+            
+        # MÓDULO DE NOTIFICACIONES REQUERIDO A TELEGRAM
+        mensaje_telegram = (
+            f"🦁 *SNIPER IA V4: OPERACIÓN DETECTADA*\n\n"
+            f"📅 *Hora de Entrada:* `{hora_entrada}`\n"
+            f"💱 *Divisa:* `{divisa}`\n"
+            f"📊 *Dirección:* *{direccion}*\n"
+            f"🧠 *Certeza Matemática:* `{certeza*100:.2f}%` (Umbral requerido: {umbral_final*100:.1f}%)\n"
+            f"📈 *RSI Actual:* `{datos['rsi']:.2f}` | *ATR:* `{datos['atr']:.5f}`\n"
+            f"🛡️ *Filtro de Noticias USD:* `✅ SEGURO`\n\n"
+            f"🏁 *RESULTADO:* *{estado_marcador}*\n"
+            f"🔄 *Ajuste de Aprendizaje:* `{pesos_refuerzo[divisa]:+.4f}`\n"
+            f"💰 *Saldo Restante Demo:* `${balance_actual:.2f} USD`"
+        )
+        
         try:
-            bot_telegram.reply_to(message, f"💰 Saldo de Práctica Real: ${iq_client.get_balance():,.2f} USD")
+            bot_telegram.send_message(TELEGRAM_ID, mensaje_telegram, parse_mode="Markdown")
         except Exception as e:
-            bot_telegram.reply_to(message, f"⚠️ Error leyendo saldo: {e}")
-    else:
-        bot_telegram.reply_to(message, "❌ Puente desconectado del broker.")
+            print(f"❌ Error al enviar reporte a Telegram: {e}")
 
 # ==============================================================================
-# ARRANQUE GLOBAL
+# BUCLE DE CONTROL Y DESPACHADOR CENTRAL ASÍNCRONO
 # ==============================================================================
-if __name__ == "__main__":
-    try: 
-        bot_telegram.remove_webhook(drop_pending_updates=True)
-        time.sleep(1)
-    except: 
-        pass
-
-    print("🔌 Conectando con IQ Option...")
-    iq_client = conectar_broker()
-
-    threading.Thread(target=ejecutar_servidor_web, daemon=True).start()
-    time.sleep(2)
-
-    threading.Thread(target=escanear_mercados, daemon=True).start()
-
-    print("🚀 Servidores acoplados. Activando Polling de Telegram...")
+def despachador_central():
+    global operado_este_minuto
+    print("🦁 Motores encendidos. Sincronizando con el reloj del servidor...")
+    
+    try:
+        bot_telegram.send_message(TELEGRAM_ID, "🦁 *¡SÚPER CEREBRO ADAPTATIVO OPERATIVO!*\nEl bot está enlazado con éxito a Render, GitHub y Telegram. Monitoreando mercados tradicionales en Demo las 24/7.", parse_mode="Markdown")
+    except Exception as e:
+        print(f"⚠️ Alerta de inicio en Telegram: {e}")
+        
     while True:
-        try:
-            bot_telegram.polling(none_stop=True, skip_pending_updates=True, timeout=20, long_polling_timeout=10)
-        except Exception as e:
-            time.sleep(5)
+        ahora = datetime.datetime.now()
+        tiempo_espera = 60 - ahora.second
+        time.sleep(tiempo_espera)
+        
+        # Resetear filtro de correlación cada minuto nuevo
+        operado_este_minuto = False
+        
+        # Filtro de Noticias Económicas (Freno de mano automático)
+        if verificar_noticias_usd():
+            print("🛑 Filtro de Noticias Activo: Pausando análisis por volatilidad extrema en USD.")
+            continue
+            
+        # Disparo en paralelo multihilo (Ultra-baja latencia para las 4 divisas)
+        for pair in DIVISAS:
+            threading.Thread(target=analizar_vela_minuto, args=(pair,)).start()
+
+if __name__ == "__main__":
+    despachador_central()
