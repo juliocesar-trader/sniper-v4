@@ -41,6 +41,9 @@ except Exception as e:
 pesos_refuerzo = {divisa: 0.0 for divisa in DIVISAS}
 lock_csv = threading.Lock()
 
+# Variable global para el estado de noticias (Evita retrasos en el segundo cero)
+noticias_usd_activas = False
+
 # ==============================================================================
 # SISTEMA DE REGISTRO PERMANENTE CSV (Auditoría dentro de Render)
 # ==============================================================================
@@ -65,55 +68,59 @@ def registrar_operacion_csv(datos_fila):
             print(f"⚠️ Error al escribir fila en bitácora CSV: {e}")
 
 # ==============================================================================
-# FILTRO DE NOTICIAS DE ALTO IMPACTO (Investing.com)
+# FILTRO DE NOTICIAS ASÍNCRONO (Ejecución en segundo plano)
 # ==============================================================================
-def verificar_noticias_usd():
-    try:
-        url = "https://es.investing.com/economic-calendar/"
-        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
-        respuesta = requests.get(url, headers=headers, timeout=5)
-        if respuesta.status_code != 200:
-            return False
-            
-        soup = BeautifulSoup(respuesta.text, 'html.parser')
-        tabla = soup.find('table', {'id': 'economicCalendarTable'})
-        if not tabla:
-            return False
-            
-        filas = tabla.find_all('tr', class_='js-event-item')
-        hora_actual = datetime.datetime.now()
+def bucle_asincrono_noticias():
+    global noticias_usd_activas
+    while True:
+        try:
+            url = "https://es.investing.com/economic-calendar/"
+            headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
+            respuesta = requests.get(url, headers=headers, timeout=5)
+            if respuesta.status_code == 200:
+                soup = BeautifulSoup(respuesta.text, 'html.parser')
+                tabla = soup.find('table', {'id': 'economicCalendarTable'})
+                
+                if tabla:
+                    filas = tabla.find_all('tr', class_='js-event-item')
+                    hora_actual = datetime.datetime.now()
+                    encontro_noticia = False
+                    
+                    for fila in filas:
+                        impacto = fila.find('td', class_='sentiment')
+                        estrellas = len(impacto.find_all('i', class_='grayFullBullishIcon')) if impacto else 0
+                        
+                        if estrellas == 3:
+                            divisa_noticia = fila.find('td', class_='flagCur').text.strip()
+                            if divisa_noticia == "USD":
+                                hora_str = fila.find('td', class_='time').text.strip()
+                                try:
+                                    hora_noticia = datetime.datetime.strptime(hora_str, "%H:%M").replace(
+                                        year=hora_actual.year, month=hora_actual.month, day=hora_actual.day
+                                    )
+                                    diferencia = abs((hora_actual - hora_noticia).total_seconds() / 60.0)
+                                    if diferencia <= 15:
+                                        encontro_noticia = True
+                                        break
+                                except:
+                                    continue
+                    
+                    noticias_usd_activas = encontro_noticia
+        except Exception as e:
+            print(f"⚠️ Alerta en Filtro de Noticias en segundo plano: {e}")
         
-        for fila in filas:
-            impacto = fila.find('td', class_='sentiment')
-            estrellas = len(impacto.find_all('i', class_='grayFullBullishIcon')) if impacto else 0
-            
-            if estrellas == 3:
-                divisa_noticia = fila.find('td', class_='flagCur').text.strip()
-                if divisa_noticia == "USD":
-                    hora_str = fila.find('td', class_='time').text.strip()
-                    try:
-                        hora_noticia = datetime.datetime.strptime(hora_str, "%H:%M").replace(
-                            year=hora_actual.year, month=hora_actual.month, day=hora_actual.day
-                        )
-                        diferencia = abs((hora_actual - hora_noticia).total_seconds() / 60.0)
-                        if diferencia <= 15:
-                            return True
-                    except:
-                        continue
-    except Exception as e:
-        print(f"⚠️ Alerta en Filtro de Noticias: {e}")
-    return False
+        time.sleep(300) # Se actualiza en segundo plano cada 5 minutos de forma limpia
 
 # ==============================================================================
-# EXTRACCIÓN Y CÁLCULO DE INDICADORES TÉCNICOS (Mapeo Blindado contra KeyErrors)
+# EXTRACCIÓN Y CÁLCULO DE INDICADORES TÉCNICOS (Mapeo Completo de 17 Variables)
 # ==============================================================================
 def calcular_las_17_variables(velas):
     df = pd.DataFrame(velas)
     
     # 🛡️ MAPEO CRÍTICO DE COLUMNAS (Evita fallos por variaciones del broker)
     columnas_map = {
-        'max': 'high', 'min': 'low', 'close': 'close', 'open': 'open',
-        'high': 'high', 'low': 'low'
+        'max': 'high', 'min': 'low', 'close': 'close', 'open': 'open', 'volume': 'volumen',
+        'high': 'high', 'low': 'low', 'vol': 'volumen'
     }
     df = df.rename(columns=columnas_map)
     
@@ -121,6 +128,11 @@ def calcular_las_17_variables(velas):
     df['close'] = df['close'].astype(float)
     df['high'] = df['high'].astype(float)
     df['low'] = df['low'].astype(float)
+    df['open'] = df['open'].astype(float)
+    
+    if 'volumen' not in df.columns:
+        df['volumen'] = 0.0
+    df['volumen'] = df['volumen'].astype(float)
     
     # RSI 14
     delta = df['close'].diff()
@@ -166,7 +178,56 @@ def calcular_las_17_variables(velas):
     return df.iloc[-1].to_dict()
 
 # ==============================================================================
-# OPERACIÓN EN PARALELO Y RETROALIMENTACIÓN
+# HILO DE SEGUIMIENTO ASÍNCRONO DE OPERACIONES (No congela el análisis)
+# ==============================================================================
+def procesar_resultado_operacion(id_operacion, divisa, direccion, certeza, umbral_final, datos, hora_entrada):
+    global API
+    # Espera asíncrona dedicada únicamente a este hilo de operación
+    time.sleep(61)
+    
+    try:
+        resultado, ganancia = API.check_win_v3(id_operacion)
+        balance_actual = API.get_balance()
+    except:
+        resultado, ganancia, balance_actual = "error", 0, 0
+    
+    if resultado == "win":
+        pesos_refuerzo[divisa] -= 0.010
+        estado_marcador = f"🟢 GANADA (+${ganancia:.2f} USD)"
+        csv_status = "GANADA"
+    else:
+        pesos_refuerzo[divisa] += 0.015
+        estado_marcador = "🔴 PERDIDA (-$1.00 USD)"
+        csv_status = "PERDIDA"
+        
+    datos_registro = [
+        hora_entrada, divisa, direccion, f"{certeza*100:.2f}%",
+        f"{datos['rsi']:.2f}", f"{datos['atr']:.6f}", csv_status,
+        f"{pesos_refuerzo[divisa]:+.4f}", f"${balance_actual:.2f}"
+    ]
+    registrar_operacion_csv(datos_registro)
+        
+    mensaje_telegram = (
+        f"🦁 *SNIPER IA V4: OPERACIÓN CONCLUIDA*\n\n"
+        f"📅 *Hora de Entrada:* `{hora_entrada}`\n"
+        f"💱 *Divisa:* `{divisa}`\n"
+        f"📊 *Dirección:* *{direccion}*\n"
+        f"🧠 *Certeza IA:* `{certeza*100:.2f}%` (Umbral: {umbral_final*100:.1f}%)\n"
+        f"📈 *RSI:* `{datos['rsi']:.2f}` | *ATR:* `{datos['atr']:.5f}`\n"
+        f"🛡️ *Filtro de Noticias USD:* `✅ SEGURO`\n\n"
+        f"🏁 *RESULTADO:* *{estado_marcador}*\n"
+        f"🔄 *Evolución de Pesos:* `{pesos_refuerzo[divisa]:+.4f}`\n"
+        f"💾 *Auditoría CSV:* `✅ Guardado en Render`\n"
+        f"💰 *Saldo Cuenta Demo:* `${balance_actual:.2f} USD`"
+    )
+    
+    try:
+        bot_telegram.send_message(TELEGRAM_ID, mensaje_telegram, parse_mode="Markdown")
+    except Exception as e:
+        print(f"❌ Error Telegram: {e}")
+
+# ==============================================================================
+# OPERACIÓN EN PARALELO
 # ==============================================================================
 bloqueo_correlacion = threading.Lock()
 operado_este_minuto = False
@@ -200,10 +261,15 @@ def analizar_vela_minuto(divisa):
     umbral_final = max(0.70, min(0.90, umbral_base + pesos_refuerzo[divisa]))
     
     if modelo_ia:
-        features = np.array([datos['rsi'], datos['atr'], datos['banda_sup'], datos['banda_inf'],
-                             datos['ema_200'], datos['macd_line'], datos['macd_signal'],
-                             datos['slowk'], datos['slowd'], datos['adx'],
-                             datos['distancia_ema'], datos['hora_numerica']]).reshape(1, -1)
+        # 🧠 MATRIZ DE 17 VARIABLES EN EL ORDEN EXACTO DEL ENTRENAMIENTO
+        features = np.array([
+            datos['rsi'], datos['atr'], datos['banda_sup'], datos['banda_inf'],
+            datos['ema_200'], datos['macd_line'], datos['macd_signal'],
+            datos['slowk'], datos['slowd'], datos['adx'], datos['distancia_ema'],
+            datos['hora_numerica'], datos['open'], datos['high'], datos['low'],
+            datos['close'], datos['volumen']
+        ]).reshape(1, -1)
+        
         probabilidades = modelo_ia.predict_proba(features)[0]
         prob_call, prob_put = probabilidades[1], probabilidades[0]
         direccion = "CALL" if prob_call > prob_put else "PUT"
@@ -231,48 +297,12 @@ def analizar_vela_minuto(divisa):
             return
             
         print(f"🚀 Ejecutando {direccion} en {divisa} (Demo)...")
-        time.sleep(61)
         
-        try:
-            resultado, ganancia = API.check_win_v3(id_operacion)
-            balance_actual = API.get_balance()
-        except:
-            resultado, ganancia, balance_actual = "error", 0, 0
-        
-        if resultado == "win":
-            pesos_refuerzo[divisa] -= 0.010
-            estado_marcador = f"🟢 GANADA (+${ganancia:.2f} USD)"
-            csv_status = "GANADA"
-        else:
-            pesos_refuerzo[divisa] += 0.015
-            estado_marcador = "🔴 PERDIDA (-$1.00 USD)"
-            csv_status = "PERDIDA"
-            
-        datos_registro = [
-            hora_entrada, divisa, direccion, f"{certeza*100:.2f}%",
-            f"{datos['rsi']:.2f}", f"{datos['atr']:.6f}", csv_status,
-            f"{pesos_refuerzo[divisa]:+.4f}", f"${balance_actual:.2f}"
-        ]
-        registrar_operacion_csv(datos_registro)
-            
-        mensaje_telegram = (
-            f"🦁 *SNIPER IA V4: OPERACIÓN DETECTADA*\n\n"
-            f"📅 *Hora de Entrada:* `{hora_entrada}`\n"
-            f"💱 *Divisa:* `{divisa}`\n"
-            f"📊 *Dirección:* *{direccion}*\n"
-            f"🧠 *Certeza IA:* `{certeza*100:.2f}%` (Umbral: {umbral_final*100:.1f}%)\n"
-            f"📈 *RSI:* `{datos['rsi']:.2f}` | *ATR:* `{datos['atr']:.5f}`\n"
-            f"🛡️ *Filtro de Noticias USD:* `✅ SEGURO`\n\n"
-            f"🏁 *RESULTADO:* *{estado_marcador}*\n"
-            f"🔄 *Evolución de Pesos:* `{pesos_refuerzo[divisa]:+.4f}`\n"
-            f"💾 *Auditoría CSV:* `✅ Guardado en Render`\n"
-            f"💰 *Saldo Cuenta Demo:* `${balance_actual:.2f} USD`"
-        )
-        
-        try:
-            bot_telegram.send_message(TELEGRAM_ID, mensaje_telegram, parse_mode="Markdown")
-        except Exception as e:
-            print(f"❌ Error Telegram: {e}")
+        # Lanzamos el proceso de seguimiento en un hilo independiente para liberar esta divisa de inmediato
+        threading.Thread(
+            target=procesar_resultado_operacion, 
+            args=(id_operacion, divisa, direccion, certeza, umbral_final, datos, hora_entrada)
+        ).start()
 
 # ==============================================================================
 # BUCLE CENTRAL ASÍNCRONO
@@ -280,10 +310,14 @@ def analizar_vela_minuto(divisa):
 def despachador_central():
     global operado_este_minuto
     inicializar_csv_render()
+    
+    # Lanzamos el filtro de noticias asíncrono para que trabaje de fondo de manera aislada
+    threading.Thread(target=bucle_asincrono_noticias, daemon=True).start()
+    
     print("🦁 Motores encendidos. Sincronizando con el reloj del servidor...")
     
     try:
-        bot_telegram.send_message(TELEGRAM_ID, "🦁 *¡SÚPER CEREBRO ONLINE SIN ERRORES DE DATOS!*\nCorregido el mapeo de columnas para el cálculo de indicadores. Escaneando mercados...", parse_mode="Markdown")
+        bot_telegram.send_message(TELEGRAM_ID, "🦁 *¡SÚPER CEREBRO ONLINE SIN ERRORES DE DATOS!*\nCorregido el mapeo de columnas para las 17 variables exactas. Escaneando mercados...", parse_mode="Markdown")
     except Exception as e:
         print(f"⚠️ Alerta Telegram: {e}")
         
@@ -294,7 +328,8 @@ def despachador_central():
         
         operado_este_minuto = False
         
-        if verificar_noticias_usd():
+        # Consulta instantánea en memoria libre de retrasos web
+        if noticias_usd_activas:
             print("🛑 Filtro de Noticias Activo: Pausando análisis por volatilidad en USD.")
             continue
             
