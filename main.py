@@ -9,7 +9,7 @@ import telebot
 from flask import Flask
 
 # ==============================================================================
-# CARGA SEGURA DE VARIABLES
+# ENTORNO SEGURO Y CONFIGURACIÓN GENERAL
 # ==============================================================================
 API_KEY = os.environ.get("BINANCE_API_KEY")
 API_SECRET = os.environ.get("BINANCE_SECRET_KEY")
@@ -25,86 +25,130 @@ def enviar_notificacion_telegram(mensaje):
         except Exception as e:
             print(f"⚠️ Error Telegram: {e}")
 
-print("🔥 Sniper V5 - MODO PRUEBA DE FUEGO INSTANTÁNEA ACTIVADO 🔥")
-
 exchange = ccxt.binance({
     'apiKey': API_KEY,
     'secret': API_SECRET,
     'options': {'defaultType': 'future'},
     'enableRateLimit': True
 })
+# SE MANTIENE EN MODO DEMO PARA TU PROTECCIÓN TOTAL
 exchange.set_sandbox_mode(True)
 
-PARES = ["BTC/USDT"]  # Probamos solo con BTC para rapidez
+PARES = ["BTC/USDT", "ETH/USDT", "SOL/USDT"]
+
+print("🦁 Sniper V5 Pro - Modo Operativo Activado")
 
 # ==============================================================================
-# EJECUCIÓN FORZADA (PRUEBA DE DISPARO Y SALDO)
+# MOTOR ANÁLISIS: REVERSIÓN A LA MEDIA (1 MINUTO)
 # ==============================================================================
-def ejecutar_caceria_sniper(par):
+def calcular_estrategia_sniper(par):
     try:
-        # 1. Consultar saldo inicial en la Demo
-        balance = exchange.fetch_balance()
-        saldo_inicial = balance['total'].get('USDT', 0.0)
-        
-        # Descarga rápida para calcular el ATR para los candados matemáticos
-        candles = exchange.fetch_ohlcv(par, timeframe='1m', limit=20)
+        candles = exchange.fetch_ohlcv(par, timeframe='1m', limit=50)
         df = pd.DataFrame(candles, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
+        
+        # RSI Wilder
+        delta = df['close'].diff()
+        gains = delta.where(delta > 0, 0)
+        losses = -delta.where(delta < 0, 0)
+        avg_gain = gains.ewm(com=13, adjust=False).mean()
+        avg_loss = losses.ewm(com=13, adjust=False).mean()
+        rs = avg_gain / (avg_loss + 1e-10)
+        df['rsi'] = 100 - (100 / (1 + rs))
+        
+        # ATR para Candados
         df['tr'] = np.maximum(df['high'] - df['low'], 
                               np.maximum(abs(df['high'] - df['close'].shift()), 
                                          abs(df['low'] - df['close'].shift())))
-        atr = df['tr'].ewm(com=13, adjust=False).mean().iloc[-1]
-        precio_actual = df['close'].iloc[-1]
+        df['atr'] = df['tr'].ewm(com=13, adjust=False).mean()
+        df['volumen_medio'] = df['volume'].rolling(window=15).mean()
         
-        print(f"🎯 Forzando disparo de prueba en {par}... Saldo actual: ${saldo_inicial:.2f}")
-        
-        # Tamaño micro para la prueba
-        monto_contrato = 0.001 
-        
-        # Forzamos una orden de COMPRA de mercado para probar los rieles
-        orden = exchange.create_order(symbol=par, type='market', side='buy', amount=monto_contrato)
-        precio_entrada = orden['price'] if 'price' in orden else precio_actual
-        
-        # Candados strictly 1:2
-        distancia_sl = atr * 1.5
-        distancia_tp = distancia_sl * 2.0
-        stop_loss = precio_entrada - distancia_sl
-        take_profit = precio_entrada + distancia_tp
-        
-        # 2. Consultar saldo inmediatamente después de abrir (para ver la comisión/margen)
-        balance_post = exchange.fetch_balance()
-        saldo_post = balance_post['total'].get('USDT', 0.0)
-        
-        informe = (
-            f"🔥 *[PRUEBA DE FUEGO] ¡Disparo Exitoso!* 🔥\n\n"
-            f"🔹 *Par:* {par}\n"
-            f"🟩 *Acción:* COMPRA FORZADA (Prueba de Rieles)\n"
-            f"📊 *Precio Entrada:* {precio_entrada:.2f}\n"
-            f"🛑 *Stop Loss:* {stop_loss:.2f}\n"
-            f"💰 *Take Profit:* {take_profit:.2f}\n\n"
-            f"💳 *Saldo Inicial Demo:* ${saldo_inicial:.2f} USDT\n"
-            f"📉 *Saldo Tras Apertura:* ${saldo_post:.2f} USDT\n\n"
-            f"🚀 _El bot tiene acceso total de escritura en Binance Testnet._"
-        )
-        
-        enviar_notificacion_telegram(informe)
-        
-        # Para no inundar la cuenta, detenemos el script tras el disparo exitoso
-        os._exit(0)
-        
+        return df.iloc[-2].to_dict()
     except Exception as e:
-        error_msg = f"❌ *Fallo en la Prueba de Fuego*:\n`{str(e)}`"
-        print(error_msg)
-        enviar_notificacion_telegram(error_msg)
-        os._exit(1)
+        print(f"⚠️ Error matemático en {par}: {e}")
+        return None
 
+# ==============================================================================
+# CAZA Y GESTIÓN ASIMÉTRICA 1:2
+# ==============================================================================
+def ejecutar_caceria_sniper(par):
+    datos = calcular_estrategia_sniper(par)
+    if not datos:
+        return
+        
+    precio_actual = datos['close']
+    atr = datos['atr']
+    rsi = datos['rsi']
+    volumen = datos['volume']
+    volumen_medio = datos['volumen_medio']
+    
+    direccion = None
+    # Filtros matemáticos institucionales rígidos
+    if rsi < 24 and volumen > (volumen_medio * 1.4):
+        direccion = "BUY"
+    elif rsi > 76 and volumen > (volumen_medio * 1.4):
+        direccion = "SELL"
+
+    if direccion:
+        try:
+            # Consultamos saldo antes del disparo
+            bal = exchange.fetch_balance()
+            saldo_inicial = bal['total'].get('USDT', 0.0)
+            
+            # Tamaño asignado para simulación controlada
+            monto_contrato = 0.001 if "BTC" in par else (0.01 if "ETH" in par else 0.1)
+            tipo_orden = 'buy' if direccion == "BUY" else 'sell'
+            
+            orden = exchange.create_order(symbol=par, type='market', side=tipo_orden, amount=monto_contrato)
+            precio_entrada = orden['price'] if 'price' in orden else precio_actual
+            
+            # Candados 1:2 basados en volatilidad real
+            distancia_sl = atr * 1.5
+            distancia_tp = distancia_sl * 2.0
+            
+            if direccion == "BUY":
+                stop_loss = precio_entrada - distancia_sl
+                take_profit = precio_entrada + distancia_tp
+            else:
+                stop_loss = precio_entrada + distancia_sl
+                take_profit = precio_entrada - distancia_tp
+                
+            # Mandamos reporte de ejecución real al canal
+            informe = (
+                f"🎯 *[Sniper V5] Operación Detectada y Ejecutada*\n\n"
+                f"🔹 *Par:* {par}\n"
+                f"🔹 *Estrategia:* Reversión a la Media\n"
+                f"🔹 *Posición:* {'🟩 COMPRA (Long)' if direccion == 'BUY' else '🟥 VENTA (Short)'}\n\n"
+                f"📊 *Entrada:* {precio_entrada:.2f}\n"
+                f"🛑 *Stop Loss (Pérdida Mínima):* {stop_loss:.2f}\n"
+                f"💰 *Take Profit (Doble Ganancia):* {take_profit:.2f}\n\n"
+                f"💳 *Saldo Disponible Demo:* ${saldo_inicial:.2f} USDT"
+            )
+            enviar_notificacion_telegram(informe)
+            
+        except Exception as e:
+            print(f"❌ Error al enviar orden a Binance: {e}")
+
+# ==============================================================================
+# RELOJ DE CONTROL REPETITIVO
+# ==============================================================================
 def bucle_principal_sniper():
-    # Espera 5 segundos tras arrancar y dispara la prueba
-    time.sleep(5)
-    ejecutar_caceria_sniper("BTC/USDT")
+    print("🦁 Sniper V5 en posición en los servidores de Render...")
+    enviar_notificacion_telegram("🦁 *¡Sniper V5 listo para la acción!* Modo cacería estadística activado 24/7 en Binance Demo.")
+    
+    while True:
+        ahora = datetime.datetime.now()
+        espera = 60 - ahora.second
+        time.sleep(espera)  # Asegura ejecución exacta en el segundo cero de cada minuto
+        
+        for par in PARES:
+            threading.Thread(target=ejecutar_caceria_sniper, args=(par,)).start()
 
+# ==============================================================================
+# PERSISTENCIA CLOUD
+# ==============================================================================
 app = Flask(__name__)
 @app.route('/')
-def index(): return "Modo Prueba de Fuego corriendo."
+def index(): return "Sniper V5 Monitoreando el Mercado Cripto 24/7."
 
 if __name__ == "__main__":
     hilo_bot = threading.Thread(target=bucle_principal_sniper)
