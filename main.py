@@ -53,6 +53,10 @@ def conectar_google_sheets():
         scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
         creds_dict = obtener_json_credenciales_google() 
         
+        # 👁️ ESTA LÍNEA NOS VA A DECIR QUÉ CORREO REALMENTE ESTÁ USANDO EL BOT
+        if creds_dict:
+            print(f"📧 El bot está intentando entrar con el correo: {creds_dict.get('client_email')}")
+
         if not creds_dict:
             print("⚠️ Alerta: La función obtener_json_credenciales_google() devolvió vacío.")
             return None
