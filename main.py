@@ -13,7 +13,7 @@ from flask import Flask
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 
-# Importamos el puente seguro desde tus credenciales originales e incluimos la lectura de la llave JSON
+# Importamos el puente seguro desde tus credenciales originales
 from credenciales import conectar_broker, bot_telegram, TELEGRAM_ID, obtener_json_credenciales_google
 
 # ==============================================================================
@@ -53,14 +53,12 @@ def conectar_google_sheets():
         scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
         creds_dict = obtener_json_credenciales_google() 
         
-        # 👁️ ESTA LÍNEA NOS VA A DECIR QUÉ CORREO REALMENTE ESTÁ USANDO EL BOT
-        if creds_dict:
-            print(f"📧 El bot está intentando entrar con el correo: {creds_dict.get('client_email')}")
-
         if not creds_dict:
-            print("⚠️ Alerta: La función obtener_json_credenciales_google() devolvió vacío.")
             return None
             
+        # Imprime el correo real en consola solo para confirmar visualmente la carga
+        print(f"📧 Autenticando en Google con el usuario del bot: {creds_dict.get('client_email')}")
+        
         creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
         cliente = gspread.authorize(creds)
         
@@ -215,7 +213,6 @@ def procesar_resultado_operacion(id_operacion, divisa, direccion, certeza, umbra
         f"{pesos_refuerzo[divisa]:+.4f}", f"${balance_actual:.2f}"
     ]
     
-    # Enviamos la fila directo a Google Sheets en lugar de usar el CSV local
     registrar_operacion_sheets(datos_registro)
         
     mensaje_telegram = (
@@ -263,7 +260,6 @@ def analizar_vela_minuto(divisa):
         return
         
     try:
-        # Modificado para extraer la cantidad exacta de variables del entrenamiento
         datos = calcular_las_12_variables(velas)
     except Exception as e:
         print(f"⚠️ Error calculando métricas para {divisa}: {e}")
@@ -320,9 +316,7 @@ def analizar_vela_minuto(divisa):
 def despachador_central():
     global operado_este_minuto
     
-    # Se eliminó la inicialización local del CSV para evitar escrituras redundantes
     threading.Thread(target=bucle_asincrono_noticias, daemon=True).start()
-    
     print("🦁 Motores encendidos. Sincronizando con el reloj del servidor...")
     
     try:
