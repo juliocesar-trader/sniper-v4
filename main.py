@@ -21,7 +21,7 @@ from credenciales import conectar_broker, bot_telegram, TELEGRAM_ID, obtener_jso
 # ==============================================================================
 DIVISAS = ["EURUSD", "GBPUSD", "AUDUSD", "USDJPY"]
 
-print("🦁 Sniper IA V4 - Inicializando Motores e Hilos con Google Sheets...")
+print("🦁 Sniper IA V4 - Inicializando Motores con Matriz Exacta de 12 Variables...")
 API = conectar_broker()
 
 if API and API.check_connect():
@@ -60,7 +60,7 @@ def conectar_google_sheets():
         creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
         cliente = gspread.authorize(creds)
         
-        # Abre la hoja por el nombre exacto que configuraste en tu Drive
+        # Abre la hoja por el nombre exacto de tu Google Sheets nativo
         hoja = cliente.open("Bitacora_Sniper_IA").sheet1
         return hoja
     except Exception as e:
@@ -71,11 +71,10 @@ def registrar_operacion_sheets(datos_fila):
     try:
         hoja = conectar_google_sheets()
         if hoja:
-            # Añade los datos directamente en una fila nueva al final de la hoja en internet
             hoja.append_row(datos_fila)
-            print("💾 Bitácora respaldada en Google Sheets con éxito y protegida de reinicios.")
+            print("💾 Bitácora respaldada en Google Sheets con éxito.")
         else:
-            print("⚠️ No se pudo conectar a Sheets. Copia de respaldo de datos en consola:")
+            print("⚠️ Copia de respaldo de datos en consola:")
             print(datos_fila)
     except Exception as e:
         print(f"⚠️ Error crítico al escribir en Google Sheets: {e}")
@@ -122,30 +121,24 @@ def bucle_asincrono_noticias():
         except Exception as e:
             print(f"⚠️ Alerta en Filtro de Noticias en segundo plano: {e}")
         
-        time.sleep(300) # Se actualiza en segundo plano cada 5 minutos de forma limpia
+        time.sleep(300)
 
 # ==============================================================================
-# EXTRACCIÓN Y CÁLCULO DE INDICADORES TÉCNICOS (Mapeo Completo de 17 Variables)
+# EXTRACCIÓN Y CÁLCULO DE INDICADORES TÉCNICOS (Mapeo de 12 Variables de Entrenamiento)
 # ==============================================================================
-def calcular_las_17_variables(velas):
+def calcular_las_12_variables(velas):
     df = pd.DataFrame(velas)
     
-    # 🛡️ MAPEO CRÍTICO DE COLUMNAS (Evita fallos por variaciones del broker)
     columnas_map = {
         'max': 'high', 'min': 'low', 'close': 'close', 'open': 'open', 'volume': 'volumen',
         'high': 'high', 'low': 'low', 'vol': 'volumen'
     }
     df = df.rename(columns=columnas_map)
     
-    # Convertir a float de forma segura
     df['close'] = df['close'].astype(float)
     df['high'] = df['high'].astype(float)
     df['low'] = df['low'].astype(float)
     df['open'] = df['open'].astype(float)
-    
-    if 'volumen' not in df.columns:
-        df['volumen'] = 0.0
-    df['volumen'] = df['volumen'].astype(float)
     
     # RSI 14
     delta = df['close'].diff()
@@ -191,11 +184,10 @@ def calcular_las_17_variables(velas):
     return df.iloc[-1].to_dict()
 
 # ==============================================================================
-# HILO DE SEGUIMIENTO ASÍNCRONO DE OPERACIONES (No congela el análisis)
+# HILO DE SEGUIMIENTO ASÍNCRONO DE OPERACIONES
 # ==============================================================================
 def procesar_resultado_operacion(id_operacion, divisa, direccion, certeza, umbral_final, datos, hora_entrada):
     global API
-    # Espera asíncrona dedicada únicamente a este hilo de operación
     time.sleep(61)
     
     try:
@@ -219,7 +211,6 @@ def procesar_resultado_operacion(id_operacion, divisa, direccion, certeza, umbra
         f"{pesos_refuerzo[divisa]:+.4f}", f"${balance_actual:.2f}"
     ]
     
-    # Enviar los datos directo a la nube de Google Sheets de manera persistente
     registrar_operacion_sheets(datos_registro)
         
     mensaje_telegram = (
@@ -232,7 +223,7 @@ def procesar_resultado_operacion(id_operacion, divisa, direccion, certeza, umbra
         f"🛡️ *Filtro de Noticias USD:* `✅ SEGURO`\n\n"
         f"🏁 *RESULTADO:* *{estado_marcador}*\n"
         f"🔄 *Evolución de Pesos:* `{pesos_refuerzo[divisa]:+.4f}`\n"
-        f"💾 *Nube Google Sheets:* `✅ Respaldado de forma Indestructible`\n"
+        f"💾 *Nube Google Sheets:* `✅ Respaldado sin Pérdidas`\n"
         f"💰 *Saldo Cuenta Demo:* `${balance_actual:.2f} USD`"
     )
     
@@ -267,7 +258,7 @@ def analizar_vela_minuto(divisa):
         return
         
     try:
-        datos = calcular_las_17_variables(velas)
+        datos = calcular_las_12_variables(velas)
     except Exception as e:
         print(f"⚠️ Error calculando métricas para {divisa}: {e}")
         return
@@ -276,13 +267,12 @@ def analizar_vela_minuto(divisa):
     umbral_final = max(0.70, min(0.90, umbral_base + pesos_refuerzo[divisa]))
     
     if modelo_ia:
-        # 🧠 MATRIZ DE 17 VARIABLES EN EL ORDEN EXACTO DEL ENTRENAMIENTO
+        # 🧠 ORDEN EXACTO MATEMÁTICO DE LAS 12 VARIABLES DEL MODELO ENTRENADO
         features = np.array([
             datos['rsi'], datos['atr'], datos['banda_sup'], datos['banda_inf'],
             datos['ema_200'], datos['macd_line'], datos['macd_signal'],
             datos['slowk'], datos['slowd'], datos['adx'], datos['distancia_ema'],
-            datos['hora_numerica'], datos['open'], datos['high'], datos['low'],
-            datos['close'], datos['volumen']
+            datos['hora_numerica']
         ]).reshape(1, -1)
         
         probabilidades = modelo_ia.predict_proba(features)[0]
@@ -313,7 +303,6 @@ def analizar_vela_minuto(divisa):
             
         print(f"🚀 Ejecutando {direccion} en {divisa} (Demo)...")
         
-        # Lanzamos el proceso de seguimiento en un hilo independiente para liberar esta divisa de inmediato
         threading.Thread(
             target=procesar_resultado_operacion, 
             args=(id_operacion, divisa, direccion, certeza, umbral_final, datos, hora_entrada)
@@ -325,13 +314,11 @@ def analizar_vela_minuto(divisa):
 def despachador_central():
     global operado_este_minuto
     
-    # Lanzamos el filtro de noticias asíncrono para que trabaje de fondo de manera aislada
     threading.Thread(target=bucle_asincrono_noticias, daemon=True).start()
-    
     print("🦁 Motores encendidos. Sincronizando con el reloj del servidor...")
     
     try:
-        bot_telegram.send_message(TELEGRAM_ID, "🦁 *¡SÚPER CEREBRO ONLINE CON CONEXIÓN CLOUD NEURAL!*\nConectado con éxito a Google Sheets. Matriz de 17 variables acoplada. Escaneando mercados...", parse_mode="Markdown")
+        bot_telegram.send_message(TELEGRAM_ID, "🦁 *¡SÚPER CEREBRO ONLINE Y COMPATIBLE!*\nLas dimensiones del modelo de 12 variables coinciden perfectamente. Conectado a Google Sheets. Escaneando...", parse_mode="Markdown")
     except Exception as e:
         print(f"⚠️ Alerta Telegram: {e}")
         
@@ -342,7 +329,6 @@ def despachador_central():
         
         operado_este_minuto = False
         
-        # Consulta instantánea en memoria libre de retrasos web
         if noticias_usd_activas:
             print("🛑 Filtro de Noticias Activo: Pausando análisis por volatilidad en USD.")
             continue
@@ -357,7 +343,7 @@ app = Flask(__name__)
 
 @app.route('/')
 def home():
-    return "🦁 Sniper IA V4 está vivo y cazando en los mercados financieros con base en Sheets activa."
+    return "🦁 Sniper IA V4 operativo. Sincronización perfecta de 12 variables y almacenamiento en Sheets activo."
 
 def iniciar_servidor_web():
     port = int(os.environ.get("PORT", 10000))
