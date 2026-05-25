@@ -9,11 +9,11 @@ import pandas as pd
 from bs4 import BeautifulSoup
 from flask import Flask
 
-# Librerías necesarias para la conexión robusta con Google Sheets
+# Librerías necesarias para la conexión con Google Sheets
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 
-# Importamos el puente seguro y la nueva función para obtener la llave JSON externa
+# Importamos el puente seguro desde tus credenciales originales e incluimos la lectura de la llave JSON
 from credenciales import conectar_broker, bot_telegram, TELEGRAM_ID, obtener_json_credenciales_google
 
 # ==============================================================================
@@ -21,7 +21,7 @@ from credenciales import conectar_broker, bot_telegram, TELEGRAM_ID, obtener_jso
 # ==============================================================================
 DIVISAS = ["EURUSD", "GBPUSD", "AUDUSD", "USDJPY"]
 
-print("🦁 Sniper IA V4 - Inicializando Motores con Matriz Exacta de 12 Variables...")
+print("🦁 Sniper IA V4 - Inicializando Motores e Hilos...")
 API = conectar_broker()
 
 if API and API.check_connect():
@@ -46,7 +46,7 @@ pesos_refuerzo = {divisa: 0.0 for divisa in DIVISAS}
 noticias_usd_activas = False
 
 # ==============================================================================
-# SISTEMA DE REGISTRO INTEGRADO A GOOGLE SHEETS (Disco Duro en la Nube)
+# CONEXIÓN INTEGRADA A GOOGLE SHEETS
 # ==============================================================================
 def conectar_google_sheets():
     try:
@@ -54,13 +54,13 @@ def conectar_google_sheets():
         creds_dict = obtener_json_credenciales_google() 
         
         if not creds_dict:
-            print("⚠️ Error: No se recibieron credenciales válidas desde credenciales.py.")
+            print("⚠️ Alerta: La función obtener_json_credenciales_google() devolvió vacío.")
             return None
             
         creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
         cliente = gspread.authorize(creds)
         
-        # Abre la hoja por el nombre exacto de tu Google Sheets nativo
+        # Abre la hoja por su nombre literal
         hoja = cliente.open("Bitacora_Sniper_IA").sheet1
         return hoja
     except Exception as e:
@@ -74,7 +74,7 @@ def registrar_operacion_sheets(datos_fila):
             hoja.append_row(datos_fila)
             print("💾 Bitácora respaldada en Google Sheets con éxito.")
         else:
-            print("⚠️ Copia de respaldo de datos en consola:")
+            print("⚠️ Respaldo en Sheets no disponible. Datos impresos en consola:")
             print(datos_fila)
     except Exception as e:
         print(f"⚠️ Error crítico al escribir en Google Sheets: {e}")
@@ -124,7 +124,7 @@ def bucle_asincrono_noticias():
         time.sleep(300)
 
 # ==============================================================================
-# EXTRACCIÓN Y CÁLCULO DE INDICADORES TÉCNICOS (Mapeo de 12 Variables de Entrenamiento)
+# EXTRACCIÓN Y CÁLCULO DE INDICADORES TÉCNICOS (Las 12 Variables del .txt)
 # ==============================================================================
 def calcular_las_12_variables(velas):
     df = pd.DataFrame(velas)
@@ -211,6 +211,7 @@ def procesar_resultado_operacion(id_operacion, divisa, direccion, certeza, umbra
         f"{pesos_refuerzo[divisa]:+.4f}", f"${balance_actual:.2f}"
     ]
     
+    # Enviamos la fila directo a Google Sheets en lugar de usar el CSV local
     registrar_operacion_sheets(datos_registro)
         
     mensaje_telegram = (
@@ -223,7 +224,7 @@ def procesar_resultado_operacion(id_operacion, divisa, direccion, certeza, umbra
         f"🛡️ *Filtro de Noticias USD:* `✅ SEGURO`\n\n"
         f"🏁 *RESULTADO:* *{estado_marcador}*\n"
         f"🔄 *Evolución de Pesos:* `{pesos_refuerzo[divisa]:+.4f}`\n"
-        f"💾 *Nube Google Sheets:* `✅ Respaldado sin Pérdidas`\n"
+        f"💾 *Almacenamiento:* `✅ Guardado en Google Sheets`\n"
         f"💰 *Saldo Cuenta Demo:* `${balance_actual:.2f} USD`"
     )
     
@@ -258,6 +259,7 @@ def analizar_vela_minuto(divisa):
         return
         
     try:
+        # Modificado para extraer la cantidad exacta de variables del entrenamiento
         datos = calcular_las_12_variables(velas)
     except Exception as e:
         print(f"⚠️ Error calculando métricas para {divisa}: {e}")
@@ -267,7 +269,7 @@ def analizar_vela_minuto(divisa):
     umbral_final = max(0.70, min(0.90, umbral_base + pesos_refuerzo[divisa]))
     
     if modelo_ia:
-        # 🧠 ORDEN EXACTO MATEMÁTICO DE LAS 12 VARIABLES DEL MODELO ENTRENADO
+        # 🧠 MATRIZ REDUCIDA A LAS 12 VARIABLES EXACTAS DEL ENTRENAMIENTO (.txt)
         features = np.array([
             datos['rsi'], datos['atr'], datos['banda_sup'], datos['banda_inf'],
             datos['ema_200'], datos['macd_line'], datos['macd_signal'],
@@ -314,11 +316,13 @@ def analizar_vela_minuto(divisa):
 def despachador_central():
     global operado_este_minuto
     
+    # Se eliminó la inicialización local del CSV para evitar escrituras redundantes
     threading.Thread(target=bucle_asincrono_noticias, daemon=True).start()
+    
     print("🦁 Motores encendidos. Sincronizando con el reloj del servidor...")
     
     try:
-        bot_telegram.send_message(TELEGRAM_ID, "🦁 *¡SÚPER CEREBRO ONLINE Y COMPATIBLE!*\nLas dimensiones del modelo de 12 variables coinciden perfectamente. Conectado a Google Sheets. Escaneando...", parse_mode="Markdown")
+        bot_telegram.send_message(TELEGRAM_ID, "🦁 *¡SÚPER CEREBRO ONLINE CON CONEXIÓN CLOUD NEURAL!*\nMatriz compatible de 12 variables en funcionamiento. Monitoreando mercados...", parse_mode="Markdown")
     except Exception as e:
         print(f"⚠️ Alerta Telegram: {e}")
         
@@ -343,7 +347,7 @@ app = Flask(__name__)
 
 @app.route('/')
 def home():
-    return "🦁 Sniper IA V4 operativo. Sincronización perfecta de 12 variables y almacenamiento en Sheets activo."
+    return "🦁 Sniper IA V4 activo en Render y enlazado de forma segura a Google Sheets."
 
 def iniciar_servidor_web():
     port = int(os.environ.get("PORT", 10000))
