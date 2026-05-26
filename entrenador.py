@@ -26,11 +26,11 @@ def alertar_telegram(mensaje):
         except Exception as e:
             print(f"⚠️ Error Telegram: {e}")
 
-# Parámetros de Red
+# Parámetros estructurales de la Inteligencia Artificial
 VENTANA_TIEMPO = 60
 BATCH_SIZE = 128
-EPOCHS_ESCUELA = 150  # Entrenamiento ultra profundo para buscar patrones globales
-COMBATES_PPO = 5000   # Más peleas en el gimnasio para perfeccionar reflejos de riesgo
+EPOCHS_ESCUELA = 150  # Entrenamiento ultra profundo (Búsqueda de patrones globales)
+COMBATES_PPO = 5000   # Gym de Refuerzo ampliado para dominar el riesgo de pérdida
 
 # ==============================================================================
 # ARQUITECTURA DEL TRANSFORMER (CEREBRO TEÓRICO)
@@ -54,7 +54,7 @@ class TransformerAnalista(nn.Module):
         self.proyeccion_entrada = nn.Linear(num_caracteristicas, d_model)
         self.pos_encoder = PositionalEncoding(d_model)
         encoder_layer = nn.TransformerEncoderLayer(d_model=d_model, nhead=nhead, dropout=dropout, batch_first=True)
-        # max_depth conceptual controlado mediante num_layers limitado y alto dropout
+        # Regularización rígida: max_depth controlado mediante dropout alto y capas compactas
         self.transformer_encoder = nn.TransformerEncoder(encoder_layer, num_layers=num_layers)
 
     def forward(self, x):
@@ -97,7 +97,7 @@ class MercadoGimnasio:
         if accion == 1: # COMPRA
             rendimiento = (precio_siguiente - precio_ahora) / precio_ahora
             recompensa = rendimiento * 100.0
-            if rendimiento < 0: recompensa *= 3.0 # Penalización estricta por riesgo
+            if rendimiento < 0: recompensa *= 3.0 # Penalización estricta por riesgo asimétrico
         elif accion == 2: # VENTA
             rendimiento = (precio_ahora - precio_siguiente) / precio_ahora
             recompensa = rendimiento * 100.0
@@ -144,11 +144,11 @@ def ejecutar_entrenamiento_completo():
     
     datos_mercado = descargar_datos_binance()
     if datos_mercado is None:
-        alertar_telegram("❌ Error crítico al descargar datos de origen.")
+        alertar_telegram("❌ Error crítico al descargar datos de origen de Binance.")
         return
         
-    precios_close = datos_mercado[:, 3] # Columna Close
-    datos_features = datos_mercado[:, [0, 1, 2, 3, 4, 5]] # Quitamis marcas de tiempo para procesar
+    precios_close = datos_mercado[:, 3] 
+    datos_features = datos_mercado[:, [0, 1, 2, 3, 4, 5]] 
     
     # --- FASE 1: LA ESCUELA DE ANÁLISIS ---
     dataset = DatasetEscuela(datos_features, ventana=VENTANA_TIEMPO)
@@ -186,7 +186,7 @@ def ejecutar_entrenamiento_completo():
         obs = entorno.reset()
         recompensa_total = 0.0
         
-        for _ in range(60): # Sesiones de 60 minutos alternas
+        for _ in range(60): 
             obs_t = torch.tensor(obs).unsqueeze(0)
             with torch.no_grad():
                 analisis = escuela(obs_t)
@@ -214,15 +214,29 @@ def ejecutar_entrenamiento_completo():
     np.save("desviaciones.npy", dataset.desviaciones)
     
     alertar_telegram("🏆 *¡IA PRECIOSA GRADUADA CON ÉXITO!* Los archivos neuronales base han sido inyectados localmente en el servidor. Proceso finalizado.")
-    print("Graduación completada.")
+    print("Graduación completada exitosamente.")
 
-# Webhook obligatorio de supervivencia para Render
+# ==============================================================================
+# PERSISTENCIA Y INICIO SEGURO EN RENDER
+# ==============================================================================
 app = Flask(__name__)
+
 @app.route('/')
-def index(): return "Fábrica de Inteligencia Artificial Activa y Trabajando..."
+def index(): 
+    return "Fábrica de Inteligencia Artificial Activa y Trabajando sin interrupciones."
 
 if __name__ == "__main__":
-    hilo = threading.Thread(target=ejecutar_entrenamiento_completo)
-    hilo.daemon = True
-    hilo.start()
-    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 10000)))
+    puerto = int(os.environ.get("PORT", 10000))
+    
+    # Lanzamos el entrenamiento pesado con un retraso de 10 segundos en segundo plano
+    # Esto le da tiempo vital a Render de validar que el servicio web responde al 100%
+    def iniciar_con_retraso():
+        time.sleep(10)
+        ejecutar_entrenamiento_completo()
+        
+    hilo_entrenamiento = threading.Thread(target=iniciar_con_retraso)
+    hilo_entrenamiento.daemon = True
+    hilo_entrenamiento.start()
+    
+    # Arranca Flask de inmediato para frenar el bucle de reinicios automáticos
+    app.run(host="0.0.0.0", port=puerto)
