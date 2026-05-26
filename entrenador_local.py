@@ -31,10 +31,10 @@ COMBATES_PPO = 1000
 REPORTAR_CADA = 100  
 
 # ==============================================================================
-# ARQUITECTURA DEL TRANSFORMER (Mapeo exacto de pesos de Colab)
+# ARQUITECTURA DEL TRANSFORMER (Calibrado exacto a los pesos de Colab)
 # ==============================================================================
 class PositionalEncoding(nn.Module):
-    def __init__(self, d_model, max_len=5000):
+    def __init__(self, d_model=64, max_len=5000):
         super().__init__()
         pe = torch.zeros(max_len, d_model)
         position = torch.arange(0, max_len, dtype=torch.float).unsqueeze(1)
@@ -49,8 +49,17 @@ class TransformerAnalista(nn.Module):
         super().__init__()
         self.proyeccion_entrada = nn.Linear(num_caracteristicas, d_model)
         self.pos_encoder = PositionalEncoding(d_model)
-        encoder_layer = nn.TransformerEncoderLayer(d_model=d_model, nhead=nhead, dropout=dropout, batch_first=True)
+        
+        # Ajustado dim_feedforward=2048 para que coincida exactamente con el archivo .pt de Colab
+        encoder_layer = nn.TransformerEncoderLayer(
+            d_model=d_model, 
+            nhead=nhead, 
+            dim_feedforward=2048, 
+            dropout=dropout, 
+            batch_first=True
+        )
         self.transformer_encoder = nn.TransformerEncoder(encoder_layer, num_layers=num_layers)
+        
     def forward(self, x):
         x = self.proyeccion_entrada(x) * (64 ** 0.5)
         x = self.pos_encoder(x)
@@ -110,7 +119,6 @@ def ejecutar_fabrica_local():
     global PROGRESO_WEB
     print("📖 Cargando base de datos...")
     PROGRESO_WEB = "Leyendo archivo CSV local de 4 meses..."
-    alertar_telegram("🚀 *Sincronización Web:* Iniciando motor con monitoreo en vivo...")
     
     RUTA_CSV = "BTCUSDT_1m_Ene_Abr_2026.csv"
     RUTA_TEORICO = "Transformer_Maestro_Teorico.pt"
@@ -142,7 +150,6 @@ def ejecutar_fabrica_local():
         bot_ppo.load_state_dict(torch.load(RUTA_OPERATIVO, map_location=torch.device('cpu')))
     except Exception as e:
         PROGRESO_WEB = f"❌ Error cargando redes neuronales: {str(e)}"
-        alertar_telegram(PROGRESO_WEB)
         return
 
     optimizer_ppo = optim.Adam(bot_ppo.parameters(), lr=0.0001)
@@ -162,7 +169,7 @@ def ejecutar_fabrica_local():
         for _ in range(30): 
             obs_t = torch.tensor(obs).unsqueeze(0)
             with torch.no_grad():
-                analisis = school = escuela(obs_t)
+                analisis = escuela(obs_t)
             probs = bot_ppo(analisis)
             accion = torch.argmax(probs, dim=-1).item()
             
@@ -198,7 +205,6 @@ app = Flask(__name__)
 @app.route('/')
 def index(): 
     global PROGRESO_WEB
-    # Genera un diseño simple para que lo leas cómodamente desde el móvil
     return f"""
     <html>
         <head><title>Panel Sniper V4</title><meta http-equiv="refresh" content="5"></head>
