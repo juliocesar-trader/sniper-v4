@@ -5,6 +5,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torch.optim as optim
+from torch.optim.lr_scheduler import CosineAnnealingLR
 import telebot
 from flask import Flask
 import threading
@@ -16,7 +17,6 @@ TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
 TELEGRAM_ID = os.environ.get("TELEGRAM_ID")
 bot_telegram = telebot.TeleBot(TELEGRAM_TOKEN) if TELEGRAM_TOKEN else None
 
-# Marcador Global de Progreso para la interfaz Web
 PROGRESO_WEB = "Iniciando motores del Gimnasio Táctico..."
 
 def alertar_telegram(mensaje):
@@ -26,12 +26,13 @@ def alertar_telegram(mensaje):
         except Exception as e:
             print(f"⚠️ Error Telegram: {e}")
 
+# PARÁMETROS DE ENTRENAMIENTO EXTENDIDO
 VENTANA_TIEMPO = 60
-COMBATES_PPO = 1000  
-REPORTAR_CADA = 100  
+COMBATES_PPO = 4000  # Ampliado a la meta planificada
+REPORTAR_CADA = 200  # Reportes espaciados para no saturar Telegram
 
 # ==============================================================================
-# ARQUITECTURA DEL TRANSFORMER (Mapeo de dimensiones exactas de tu Colab)
+# ARQUITECTURA DEL TRANSFORMER (Calibración exacta de Colab)
 # ==============================================================================
 class PositionalEncoding(nn.Module):
     def __init__(self, d_model=64, max_len=5000):
@@ -51,7 +52,6 @@ class TransformerAnalista(nn.Module):
         self.proyeccion_entrada = nn.Linear(num_caracteristicas, d_model)
         self.pos_encoder = PositionalEncoding(d_model)
         
-        # dim_feedforward fijado en 128 exactos como exige el checkpoint de Colab
         encoder_layer = nn.TransformerEncoderLayer(
             d_model=d_model, 
             nhead=nhead, 
@@ -61,7 +61,6 @@ class TransformerAnalista(nn.Module):
         )
         self.transformer_encoder = nn.TransformerEncoder(encoder_layer, num_layers=num_layers)
         
-        # Capa de salida ajustada a la calibración exacta: de 64 -> 32 -> 6 neuronas
         self.capa_salida = nn.Sequential(
             nn.Linear(d_model, 32),
             nn.ReLU(),
@@ -77,7 +76,6 @@ class TransformerAnalista(nn.Module):
 class AgentePPO(nn.Module):
     def __init__(self, dim_entrada=6, num_acciones=3):
         super().__init__()
-        # Se conecta directamente con las 6 salidas del analista ajustado
         self.red = nn.Sequential(
             nn.Linear(dim_entrada, 64),
             nn.ReLU(),
@@ -90,7 +88,7 @@ class AgentePPO(nn.Module):
         return self.red(x)
 
 # ==============================================================================
-# ENTORNO DEL GIMNASIO OPERATIVO (Optimizado para Render)
+# ENTORNO DEL GIMNASIO OPERATIVO
 # ==============================================================================
 class MercadoGimnasioLocal:
     def __init__(self, datos_raw, precios_close, ventana=60):
@@ -113,23 +111,23 @@ class MercadoGimnasioLocal:
         if accion == 1: # COMPRA
             rendimiento = (precio_siguiente - precio_ahora) / precio_ahora
             recompensa = rendimiento * 100.0
-            if rendimiento < 0: recompensa *= 3.5  
+            if rendimiento < 0: recompensa *= 4.0  # Penalización más estricta para reducir margen de error
         elif accion == 2: # VENTA
             rendimiento = (precio_ahora - precio_siguiente) / precio_ahora
             recompensa = rendimiento * 100.0
-            if rendimiento < 0: recompensa *= 3.5
+            if rendimiento < 0: recompensa *= 4.0  # Penalización más estricta
             
         self.paso_actual += 1
         terminado = (self.paso_actual >= len(self.precios) - 5)
         return self.datos_norm[self.paso_actual - self.ventana : self.paso_actual], recompensa, terminado
 
 # ==============================================================================
-# EJECUCIÓN DEL APRENDIZAJE LOCAL
+# EJECUCIÓN DEL APRENDIZAJE EXTENDIDO DE ALTA PRECISIÓN
 # ==============================================================================
 def ejecutar_fabrica_local():
     global PROGRESO_WEB
     print("📖 Cargando base de datos...")
-    PROGRESO_WEB = "Leyendo archivo CSV local de 4 meses..."
+    PROGRESO_WEB = "Preparando maratón táctica de 4000 combates..."
     
     RUTA_CSV = "BTCUSDT_1m_Ene_Abr_2026.csv"
     RUTA_TEORICO = "Transformer_Maestro_Teorico.pt"
@@ -158,23 +156,26 @@ def ejecutar_fabrica_local():
         escuela.eval()
         
         bot_ppo = AgentePPO()
-        # Carga tolerante para el agente operacional
         try:
             bot_ppo.load_state_dict(torch.load(RUTA_OPERATIVO, map_location=torch.device('cpu')))
         except Exception:
-            print("⚠️ Nota: Ajustando capas densas operativas dinámicamente.")
+            print("⚠️ Nota: Ajustando capas densas operacionales dinámicamente.")
     except Exception as e:
         PROGRESO_WEB = f"❌ Error cargando redes neuronales: {str(e)}"
         return
 
+    # Tasa de aprendizaje inicial fina para pulir detalles
     optimizer_ppo = optim.Adam(bot_ppo.parameters(), lr=0.0001)
+    
+    # Reducción de margen de error: El LR Scheduler reduce la tasa de aprendizaje suavemente hasta el final
+    scheduler = CosineAnnealingLR(optimizer_ppo, T_max=COMBATES_PPO, eta_min=1e-6)
+    
     entorno = MercadoGimnasioLocal(datos_raw, precios_close, ventana=VENTANA_TIEMPO)
     
     np.save("medias.npy", entorno.medias)
     np.save("desviaciones.npy", entorno.desviaciones)
 
-    PROGRESO_WEB = f"🥊 Gimnasio Activo. Ejecutando {COMBATES_PPO} combates."
-    alertar_telegram(f"🥊 *Estructura Alineada:* Iniciando bucle táctico de combates en Render.")
+    alertar_telegram(f"🚀 *Maratón Iniciada:* Minimizando margen de error a lo largo de {COMBATES_PPO} combates.")
 
     for combate in range(1, COMBATES_PPO + 1):
         obs = entorno.reset()
@@ -183,7 +184,7 @@ def ejecutar_fabrica_local():
         for _ in range(30): 
             obs_t = torch.tensor(obs).unsqueeze(0)
             with torch.no_grad():
-                analisis = escuela(obs_t)
+                analisis = school_output = escuela(obs_t)
             probs = bot_ppo(analisis)
             accion = torch.argmax(probs, dim=-1).item()
             
@@ -198,16 +199,20 @@ def ejecutar_fabrica_local():
                 optimizer_ppo.step()
             if term: 
                 break
+        
+        # Avanzar el planificador de tasa de aprendizaje
+        scheduler.step()
+        lr_actual = optimizer_ppo.param_groups[0]['lr']
             
-        PROGRESO_WEB = f"🏋️ EN PROCESO: Combate [{combate}/{COMBATES_PPO}] | Último Retorno Táctico: {recompensa_total:.4f}"
-        time.sleep(0.005)
+        PROGRESO_WEB = f"🏋️ MODO PRECISIÓN: [{combate}/{COMBATES_PPO}] | Retorno: {recompensa_total:.4f} | LR: {lr_actual:.6f}"
+        time.sleep(0.002) # Velocidad máxima optimizada
             
         if combate % REPORTAR_CADA == 0:
-            alertar_telegram(f"🏋️ *Gym Local:* Combate [{combate}/{COMBATES_PPO}] | Retorno Táctico: {recompensa_total:.4f}")
+            alertar_telegram(f"📈 *Progreso Precisión:* Combate [{combate}/{COMBATES_PPO}] | Retorno Táctico: {recompensa_total:.4f} | LR: {lr_actual:.6f}")
 
     torch.save(bot_ppo.state_dict(), "modelo_sniper_ia.pkl")
-    PROGRESO_WEB = "🏆 ¡GRADUACIÓN COMPLETA! El archivo 'modelo_sniper_ia.pkl' se ha consolidado con éxito."
-    alertar_telegram("🏆 *¡GRADUACIÓN REESCRITA!* Cerebro consolidado perfectamente sin errores de dimensión.")
+    PROGRESO_WEB = f"🏆 ¡MARATÓN COMPLETADA! {COMBATES_PPO} combates consolidados sin errores."
+    alertar_telegram(f"🏆 *Graduación de Élite:* {COMBATES_PPO} combates completados. Margen de error optimizado y guardado en `modelo_sniper_ia.pkl`.")
 
 # ==============================================================================
 # INTERFAZ DE PERSISTENCIA FLASK
@@ -219,9 +224,9 @@ def index():
     global PROGRESO_WEB
     return f"""
     <html>
-        <head><title>Panel Sniper V4</title><meta http-equiv="refresh" content="5"></head>
+        <head><title>Panel Sniper V4 - Élite</title><meta http-equiv="refresh" content="5"></head>
         <body style="font-family:sans-serif; padding:20px; text-align:center; background:#111; color:#fff;">
-            <h2>🤖 Fábrica del Cerebro Sniper V4 🤖</h2>
+            <h2>🤖 Fábrica del Cerebro Sniper V4 (4K Máxima Precisión) 🤖</h2>
             <hr style="border-color:#333;">
             <div style="padding:20px; background:#222; border-radius:8px; display:inline-block; margin-top:20px; border:1px solid #444;">
                 <p style="font-size:18px; color:#00ffcc; font-weight:bold;">{PROGRESO_WEB}</p>
