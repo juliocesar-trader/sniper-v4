@@ -24,7 +24,8 @@ def alertar_telegram(mensaje):
             print(f"⚠️ Error Telegram: {e}")
 
 VENTANA_TIEMPO = 60
-COMBATES_PPO = 4000  # Sesión robusta sobre tus datos locales
+COMBATES_PPO = 1000  # Optimizado a 1000 para que termine hoy mismo en Render
+REPORTAR_CADA = 100  # Te avisará seguido para ver el avance real
 
 # ==============================================================================
 # ARQUITECTURA DEL TRANSFORMER (Mapeo exacto de pesos de Colab)
@@ -66,7 +67,7 @@ class AgentePPO(nn.Module):
     def forward(self, x): return self.red(x)
 
 # ==============================================================================
-# GIMNASIO OPERATIVO REAL (Usando tu base de datos unificada de 4 meses)
+# GIMNASIO OPERATIVO REAL (Optimizado para CPU de Render)
 # ==============================================================================
 class MercadoGimnasioLocal:
     def __init__(self, datos_raw, precios_close, ventana=60):
@@ -78,7 +79,7 @@ class MercadoGimnasioLocal:
         self.reset()
 
     def reset(self):
-        self.paso_actual = np.random.randint(self.ventana, len(self.precios) - 120)
+        self.paso_actual = np.random.randint(self.ventana, len(self.precios) - 80)
         return self.datos_norm[self.paso_actual - self.ventana : self.paso_actual]
 
     def step(self, accion):
@@ -97,14 +98,14 @@ class MercadoGimnasioLocal:
             
         self.paso_actual += 1
         terminado = (self.paso_actual >= len(self.precios) - 5)
-        return self.datos_norm[self.paso_actual - self.ventana : self.paso_actual], recompensa, terminado
+        return self.datos_norm[self.paso_actual - self.ventana : self.paso_actual], recompensa, terminated
 
 # ==============================================================================
-# EJECUCIÓN MAESTRA (Transfer Learning + CSV Local)
+# EJECUCIÓN MAESTRA (Acelerada y fluida)
 # ==============================================================================
 def ejecutar_fabrica_local():
-    print("📖 Cargando base de datos e inyectando cerebros pre-entrenados...")
-    alertar_telegram("📦 *Fábrica Local Activa:* Leyendo archivo CSV de 4 meses e importando redes neuronales...")
+    print("📖 Cargando base de datos...")
+    alertar_telegram("🚀 *Aceleración de Motor:* Optimizando el entrenamiento dinámico...")
     
     RUTA_CSV = "BTCUSDT_1m_Ene_Abr_2026.csv"
     RUTA_TEORICO = "Transformer_Maestro_Teorico.pt"
@@ -112,57 +113,45 @@ def ejecutar_fabrica_local():
     
     for archivo in [RUTA_CSV, RUTA_TEORICO, RUTA_OPERATIVO]:
         if not os.path.exists(archivo):
-            alertar_telegram(f"❌ Error crítico: Falta el archivo `{archivo}` en la raíz de GitHub.")
+            alertar_telegram(f"❌ Error crítico: Falta el archivo `{archivo}`.")
             return
 
-    # 1. Leer los datos locales de forma ultra eficiente (Mapeo corregido de 6 columnas)
     try:
-        # skiprows=1 salta las cabeceras de texto; low_memory=False estabiliza los tipos de datos
-        df = pd.read_csv(RUTA_CSV, header=None, skiprows=1, low_memory=False)
-        
-        # Extraemos las columnas numéricas exactas presentes en tu archivo consolidado:
-        # [Open, High, Low, Close, Volume] y duplicamos la columna 4 (Close) para completar las 6 características
+        # Cargamos solo una porción representativa para que la CPU gratuita vuele
+        df = pd.read_csv(RUTA_CSV, header=None, skiprows=1, nrows=40000, low_memory=False)
         datos_raw = df[[1, 2, 3, 4, 5, 4]].values.astype(np.float32)
         precios_close = df[4].values.astype(np.float32)
-        
-        del df # Liberamos memoria RAM del servidor web inmediatamente
+        del df
     except Exception as e:
         alertar_telegram(f"❌ Error al procesar el CSV local: {str(e)}")
         return
 
-    # 2. Reconstruir y cargar el Transformer Analista de Colab
     try:
         escuela = TransformerAnalista()
         checkpoint = torch.load(RUTA_TEORICO, map_location=torch.device('cpu'), weights_only=False)
         escuela.load_state_dict(checkpoint['model_state_dict'])
         escuela.eval()
-    except Exception as e:
-        alertar_telegram(f"❌ Error cargando Transformer de Colab: {str(e)}")
-        return
-
-    # 3. Reconstruir y cargar el Agente de toma de decisiones PPO
-    try:
+        
         bot_ppo = AgentePPO()
         bot_ppo.load_state_dict(torch.load(RUTA_OPERATIVO, map_location=torch.device('cpu')))
     except Exception as e:
-        alertar_telegram(f"❌ Error cargando Agente PPO de Colab: {str(e)}")
+        alertar_telegram(f"❌ Error cargando redes neuronales: {str(e)}")
         return
 
     optimizer_ppo = optim.Adam(bot_ppo.parameters(), lr=0.0001)
     entorno = MercadoGimnasioLocal(datos_raw, precios_close, ventana=VENTANA_TIEMPO)
     
-    alertar_telegram("🥊 *Gimnasio en Alta Definición:* Entrenando reflejos tácticos directamente sobre los 4 meses históricos...")
+    alertar_telegram(f"🥊 *Gimnasio Fluido:* Iniciando {COMBATES_PPO} combates optimizados.")
 
-    # Guardamos las medias y desviaciones locales para el main de trading en vivo posterior
     np.save("medias.npy", entorno.medias)
     np.save("desviaciones.npy", entorno.desviaciones)
 
-    # 4. Bucle de simulación táctica del Gimnasio
+    # 4. Bucle del Gimnasio con alivio de CPU
     for combate in range(1, COMBATES_PPO + 1):
         obs = entorno.reset()
         recompensa_total = 0.0
         
-        for _ in range(60): 
+        for _ in range(30): # Rondas rápidas de 30 minutos
             obs_t = torch.tensor(obs).unsqueeze(0)
             with torch.no_grad():
                 analisis = escuela(obs_t)
@@ -180,13 +169,14 @@ def ejecutar_fabrica_local():
                 optimizer_ppo.step()
             if term: break
             
-        if combate % 1000 == 0:
+        # Liberación de CPU para que Flask y Telegram no se congelen
+        time.sleep(0.002)
+            
+        if combate % REPORTAR_CADA == 0:
             alertar_telegram(f"🏋️ *Gym Local:* Combate [{combate}/{COMBATES_PPO}] | Retorno Táctico: {recompensa_total:.4f}")
 
-    # Guardar el cerebro final hiper-optimizado listo para producción
     torch.save(bot_ppo.state_dict(), "modelo_sniper_ia.pkl")
-    alertar_telegram("🏆 *¡GRADUACIÓN ABSOLUTA CON CSV LOCAL!* El modelo `modelo_sniper_ia.pkl` ha asimilado los 4 meses y está listo.")
-    print("Proceso finalizado con éxito.")
+    alertar_telegram("🏆 *¡GRADUACIÓN REESCRITA!* El modelo `modelo_sniper_ia.pkl` está listo y pulido.")
 
 # ==============================================================================
 # INTERFAZ DE PERSISTENCIA FLASK
@@ -201,7 +191,7 @@ if __name__ == "__main__":
     puerto = int(os.environ.get("PORT", 10000))
     
     def arrancar_proceso():
-        time.sleep(10)
+        time.sleep(5)
         ejecutar_fabrica_local()
         
     hilo = threading.Thread(target=arrancar_proceso)
