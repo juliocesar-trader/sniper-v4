@@ -16,6 +16,9 @@ TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
 TELEGRAM_ID = os.environ.get("TELEGRAM_ID")
 bot_telegram = telebot.TeleBot(TELEGRAM_TOKEN) if TELEGRAM_TOKEN else None
 
+# Marcador Global de Progreso para ver en la Página Web
+PROGRESO_WEB = "Iniciando motores del Gimnasio Táctico..."
+
 def alertar_telegram(mensaje):
     if bot_telegram and TELEGRAM_ID:
         try:
@@ -24,8 +27,8 @@ def alertar_telegram(mensaje):
             print(f"⚠️ Error Telegram: {e}")
 
 VENTANA_TIEMPO = 60
-COMBATES_PPO = 1000  # Optimizado a 1000 para que termine hoy mismo en Render
-REPORTAR_CADA = 100  # Te avisará seguido para ver el avance real
+COMBATES_PPO = 1000  
+REPORTAR_CADA = 100  
 
 # ==============================================================================
 # ARQUITECTURA DEL TRANSFORMER (Mapeo exacto de pesos de Colab)
@@ -98,14 +101,16 @@ class MercadoGimnasioLocal:
             
         self.paso_actual += 1
         terminado = (self.paso_actual >= len(self.precios) - 5)
-        return self.datos_norm[self.paso_actual - self.ventana : self.paso_actual], recompensa, terminated
+        return self.datos_norm[self.paso_actual - self.ventana : self.paso_actual], recompensa, terminado
 
 # ==============================================================================
-# EJECUCIÓN MAESTRA (Acelerada y fluida)
+# EJECUCIÓN MAESTRA (Con actualización web en vivo)
 # ==============================================================================
 def ejecutar_fabrica_local():
+    global PROGRESO_WEB
     print("📖 Cargando base de datos...")
-    alertar_telegram("🚀 *Aceleración de Motor:* Optimizando el entrenamiento dinámico...")
+    PROGRESO_WEB = "Leyendo archivo CSV local de 4 meses..."
+    alertar_telegram("🚀 *Sincronización Web:* Iniciando motor con monitoreo en vivo...")
     
     RUTA_CSV = "BTCUSDT_1m_Ene_Abr_2026.csv"
     RUTA_TEORICO = "Transformer_Maestro_Teorico.pt"
@@ -113,17 +118,18 @@ def ejecutar_fabrica_local():
     
     for archivo in [RUTA_CSV, RUTA_TEORICO, RUTA_OPERATIVO]:
         if not os.path.exists(archivo):
-            alertar_telegram(f"❌ Error crítico: Falta el archivo `{archivo}`.")
+            PROGRESO_WEB = f"❌ Error Crítico: Falta el archivo {archivo}"
+            alertar_telegram(f"❌ Falta el archivo `{archivo}`.")
             return
 
     try:
-        # Cargamos solo una porción representativa para que la CPU gratuita vuele
-        df = pd.read_csv(RUTA_CSV, header=None, skiprows=1, nrows=40000, low_memory=False)
+        df = pd.read_csv(RUTA_CSV, header=None, skiprows=1, nrows=35000, low_memory=False)
         datos_raw = df[[1, 2, 3, 4, 5, 4]].values.astype(np.float32)
         precios_close = df[4].values.astype(np.float32)
         del df
     except Exception as e:
-        alertar_telegram(f"❌ Error al procesar el CSV local: {str(e)}")
+        PROGRESO_WEB = f"❌ Error procesando CSV: {str(e)}"
+        alertar_telegram(PROGRESO_WEB)
         return
 
     try:
@@ -135,26 +141,28 @@ def ejecutar_fabrica_local():
         bot_ppo = AgentePPO()
         bot_ppo.load_state_dict(torch.load(RUTA_OPERATIVO, map_location=torch.device('cpu')))
     except Exception as e:
-        alertar_telegram(f"❌ Error cargando redes neuronales: {str(e)}")
+        PROGRESO_WEB = f"❌ Error cargando redes neuronales: {str(e)}"
+        alertar_telegram(PROGRESO_WEB)
         return
 
     optimizer_ppo = optim.Adam(bot_ppo.parameters(), lr=0.0001)
     entorno = MercadoGimnasioLocal(datos_raw, precios_close, ventana=VENTANA_TIEMPO)
     
-    alertar_telegram(f"🥊 *Gimnasio Fluido:* Iniciando {COMBATES_PPO} combates optimizados.")
-
     np.save("medias.npy", entorno.medias)
     np.save("desviaciones.npy", entorno.desviaciones)
 
-    # 4. Bucle del Gimnasio con alivio de CPU
+    PROGRESO_WEB = f"🥊 Gimnasio Activo. Ejecutando {COMBATES_PPO} combates. Refresca para ver el avance."
+    alertar_telegram(f"🥊 *Gimnasio Fluido:* Entrenando... Sigue el avance directo en tu URL de Render.")
+
+    # 4. Bucle del Gimnasio con reporte en Web y Telegram
     for combate in range(1, COMBATES_PPO + 1):
         obs = entorno.reset()
         recompensa_total = 0.0
         
-        for _ in range(30): # Rondas rápidas de 30 minutos
+        for _ in range(30): 
             obs_t = torch.tensor(obs).unsqueeze(0)
             with torch.no_grad():
-                analisis = escuela(obs_t)
+                analisis = school = escuela(obs_t)
             probs = bot_ppo(analisis)
             accion = torch.argmax(probs, dim=-1).item()
             
@@ -169,29 +177,47 @@ def ejecutar_fabrica_local():
                 optimizer_ppo.step()
             if term: break
             
-        # Liberación de CPU para que Flask y Telegram no se congelen
-        time.sleep(0.002)
+        # Actualizamos el marcador en la web en cada combate individual
+        PROGRESO_WEB = f"🏋️ EN PROCESO: Combate [{combate}/{COMBATES_PPO}] | Último Retorno Táctico: {recompensa_total:.4f}"
+        
+        # Pausa estratégica para dar fluidez a Render
+        time.sleep(0.005)
             
         if combate % REPORTAR_CADA == 0:
             alertar_telegram(f"🏋️ *Gym Local:* Combate [{combate}/{COMBATES_PPO}] | Retorno Táctico: {recompensa_total:.4f}")
 
     torch.save(bot_ppo.state_dict(), "modelo_sniper_ia.pkl")
-    alertar_telegram("🏆 *¡GRADUACIÓN REESCRITA!* El modelo `modelo_sniper_ia.pkl` está listo y pulido.")
+    PROGRESO_WEB = "🏆 ¡GRADUACIÓN COMPLETA! El archivo 'modelo_sniper_ia.pkl' se ha consolidado con éxito."
+    alertar_telegram("🏆 *¡GRADUACIÓN REESCRITA!* Cerebro consolidado perfectamente.")
 
 # ==============================================================================
-# INTERFAZ DE PERSISTENCIA FLASK
+# INTERFAZ DE PERSISTENCIA FLASK (Muestra el avance dinámicamente)
 # ==============================================================================
 app = Flask(__name__)
 
 @app.route('/')
 def index(): 
-    return "Fábrica basada en Datos Locales corriendo de manera estable."
+    global PROGRESO_WEB
+    # Genera un diseño simple para que lo leas cómodamente desde el móvil
+    return f"""
+    <html>
+        <head><title>Panel Sniper V4</title><meta http-equiv="refresh" content="5"></head>
+        <body style="font-family:sans-serif; padding:20px; text-align:center; background:#111; color:#fff;">
+            <h2>🤖 Fábrica del Cerebro Sniper V4 🤖</h2>
+            <hr style="border-color:#333;">
+            <div style="padding:20px; background:#222; border-radius:8px; display:inline-block; margin-top:20px; border:1px solid #444;">
+                <p style="font-size:18px; color:#00ffcc; font-weight:bold;">{PROGRESO_WEB}</p>
+            </div>
+            <p style="font-size:12px; color:#666; margin-top:30px;">La página se refresca automáticamente cada 5 segundos.</p>
+        </body>
+    </html>
+    """
 
 if __name__ == "__main__":
     puerto = int(os.environ.get("PORT", 10000))
     
     def arrancar_proceso():
-        time.sleep(5)
+        time.sleep(4)
         ejecutar_fabrica_local()
         
     hilo = threading.Thread(target=arrancar_proceso)
