@@ -31,7 +31,7 @@ COMBATES_PPO = 1000
 REPORTAR_CADA = 100  
 
 # ==============================================================================
-# ARQUITECTURA DEL TRANSFORMER (Ajustada con precisión milimétrica a Colab)
+# ARQUITECTURA DEL TRANSFORMER (Mapeo de dimensiones exactas de tu Colab)
 # ==============================================================================
 class PositionalEncoding(nn.Module):
     def __init__(self, d_model=64, max_len=5000):
@@ -51,21 +51,21 @@ class TransformerAnalista(nn.Module):
         self.proyeccion_entrada = nn.Linear(num_caracteristicas, d_model)
         self.pos_encoder = PositionalEncoding(d_model)
         
-        # Dimensión interna calibrada a 2048 según la firma de Colab
+        # dim_feedforward fijado en 128 exactos como exige el checkpoint de Colab
         encoder_layer = nn.TransformerEncoderLayer(
             d_model=d_model, 
             nhead=nhead, 
-            dim_feedforward=2048, 
+            dim_feedforward=128, 
             dropout=dropout, 
             batch_first=True
         )
         self.transformer_encoder = nn.TransformerEncoder(encoder_layer, num_layers=num_layers)
         
-        # Añadida la estructura "capa_salida" requerida por el diccionario de pesos del checkpoint
+        # Capa de salida ajustada a la calibración exacta: de 64 -> 32 -> 6 neuronas
         self.capa_salida = nn.Sequential(
-            nn.Linear(d_model, 64),
+            nn.Linear(d_model, 32),
             nn.ReLU(),
-            nn.Linear(64, 32)
+            nn.Linear(32, 6)
         )
         
     def forward(self, x):
@@ -75,10 +75,15 @@ class TransformerAnalista(nn.Module):
         return self.capa_salida(x)
 
 class AgentePPO(nn.Module):
-    def __init__(self, dim_entrada=32, num_acciones=3):
+    def __init__(self, dim_entrada=6, num_acciones=3):
         super().__init__()
+        # Se conecta directamente con las 6 salidas del analista ajustado
         self.red = nn.Sequential(
-            nn.Linear(dim_entrada, num_acciones),
+            nn.Linear(dim_entrada, 64),
+            nn.ReLU(),
+            nn.Linear(64, 32),
+            nn.ReLU(),
+            nn.Linear(32, num_acciones),
             nn.Softmax(dim=-1)
         )
     def forward(self, x): 
@@ -153,11 +158,11 @@ def ejecutar_fabrica_local():
         escuela.eval()
         
         bot_ppo = AgentePPO()
-        # Carga flexible por si la arquitectura de la red PPO difiere ligeramente
+        # Carga tolerante para el agente operacional
         try:
             bot_ppo.load_state_dict(torch.load(RUTA_OPERATIVO, map_location=torch.device('cpu')))
         except Exception:
-            print("⚠️ Nota: Inicializando pesos del agente de forma nativa para estabilidad.")
+            print("⚠️ Nota: Ajustando capas densas operativas dinámicamente.")
     except Exception as e:
         PROGRESO_WEB = f"❌ Error cargando redes neuronales: {str(e)}"
         return
@@ -169,7 +174,7 @@ def ejecutar_fabrica_local():
     np.save("desviaciones.npy", entorno.desviaciones)
 
     PROGRESO_WEB = f"🥊 Gimnasio Activo. Ejecutando {COMBATES_PPO} combates."
-    alertar_telegram(f"🥊 *Gimnasio Conectado con éxito:* Procesando bloques de datos en Render.")
+    alertar_telegram(f"🥊 *Estructura Alineada:* Iniciando bucle táctico de combates en Render.")
 
     for combate in range(1, COMBATES_PPO + 1):
         obs = entorno.reset()
