@@ -24,7 +24,7 @@ def alertar_telegram(mensaje):
             print(f"⚠️ Error Telegram: {e}")
 
 VENTANA_TIEMPO = 60
-COMBATES_PPO = 4000  # Sesión robusta. Tu CSV local aguanta esto sin pestañear
+COMBATES_PPO = 4000  # Sesión robusta sobre tus datos locales
 
 # ==============================================================================
 # ARQUITECTURA DEL TRANSFORMER (Mapeo exacto de pesos de Colab)
@@ -66,11 +66,10 @@ class AgentePPO(nn.Module):
     def forward(self, x): return self.red(x)
 
 # ==============================================================================
-# GIMNASIO OPERATIVO REAL (Usando tu base de datos de 4 meses)
+# GIMNASIO OPERATIVO REAL (Usando tu base de datos unificada de 4 meses)
 # ==============================================================================
 class MercadoGimnasioLocal:
     def __init__(self, datos_raw, precios_close, ventana=60):
-        # Normalización rápida en memoria para proteger los gradientes
         self.medias = np.mean(datos_raw, axis=0)
         self.desviaciones = np.std(datos_raw, axis=0) + 1e-8
         self.datos_norm = (datos_raw - self.medias) / self.desviaciones
@@ -79,7 +78,6 @@ class MercadoGimnasioLocal:
         self.reset()
 
     def reset(self):
-        # Elige un punto aleatorio dentro de los 4 meses para entrenar reflejos variados
         self.paso_actual = np.random.randint(self.ventana, len(self.precios) - 120)
         return self.datos_norm[self.paso_actual - self.ventana : self.paso_actual]
 
@@ -91,7 +89,7 @@ class MercadoGimnasioLocal:
         if accion == 1: # COMPRA
             rendimiento = (precio_siguiente - precio_ahora) / precio_ahora
             recompensa = rendimiento * 100.0
-            if rendimiento < 0: recompensa *= 3.5  # Penalización quirúrgica por pérdida
+            if rendimiento < 0: recompensa *= 3.5  
         elif accion == 2: # VENTA
             rendimiento = (precio_ahora - precio_siguiente) / precio_ahora
             recompensa = rendimiento * 100.0
@@ -102,7 +100,7 @@ class MercadoGimnasioLocal:
         return self.datos_norm[self.paso_actual - self.ventana : self.paso_actual], recompensa, terminado
 
 # ==============================================================================
-# EJECUCIÓN MAESTRA (Transfer Learning + Base de Datos Local)
+# EJECUCIÓN MAESTRA (Transfer Learning + CSV Local)
 # ==============================================================================
 def ejecutar_fabrica_local():
     print("📖 Cargando base de datos e inyectando cerebros pre-entrenados...")
@@ -112,20 +110,22 @@ def ejecutar_fabrica_local():
     RUTA_TEORICO = "Transformer_Maestro_Teorico.pt"
     RUTA_OPERATIVO = "Bot_PPO_Rentable.pt"
     
-    # Verificación estricta de archivos para que Render no falle
     for archivo in [RUTA_CSV, RUTA_TEORICO, RUTA_OPERATIVO]:
         if not os.path.exists(archivo):
-            alertar_telegram(f"❌ Error crítico: Falta el archivo `{archivo}` en GitHub.")
+            alertar_telegram(f"❌ Error crítico: Falta el archivo `{archivo}` en la raíz de GitHub.")
             return
 
-    # 1. Leer los datos locales de forma ultra eficiente (tomamos las columnas OHLCV)
+    # 1. Leer los datos locales de forma ultra eficiente (Mapeo corregido de 6 columnas)
     try:
-        df = pd.read_csv(RUTA_CSV, header=None)
-        # Usamos las columnas nativas de Binance klines: Open, High, Low, Close, Volume, Taker Volume
-        columnas = [1, 2, 3, 4, 5, 9] 
-        datos_raw = df[columnas].values.astype(np.float32)
+        # skiprows=1 salta las cabeceras de texto; low_memory=False estabiliza los tipos de datos
+        df = pd.read_csv(RUTA_CSV, header=None, skiprows=1, low_memory=False)
+        
+        # Extraemos las columnas numéricas exactas presentes en tu archivo consolidado:
+        # [Open, High, Low, Close, Volume] y duplicamos la columna 4 (Close) para completar las 6 características
+        datos_raw = df[[1, 2, 3, 4, 5, 4]].values.astype(np.float32)
         precios_close = df[4].values.astype(np.float32)
-        del df # Liberamos memoria RAM de inmediato
+        
+        del df # Liberamos memoria RAM del servidor web inmediatamente
     except Exception as e:
         alertar_telegram(f"❌ Error al procesar el CSV local: {str(e)}")
         return
@@ -153,16 +153,16 @@ def ejecutar_fabrica_local():
     
     alertar_telegram("🥊 *Gimnasio en Alta Definición:* Entrenando reflejos tácticos directamente sobre los 4 meses históricos...")
 
-    # Guardamos las medias y desviaciones de estos 4 meses para el main operativo real posterior
+    # Guardamos las medias y desviaciones locales para el main de trading en vivo posterior
     np.save("medias.npy", entorno.medias)
     np.save("desviaciones.npy", entorno.desviaciones)
 
-    # 4. Bucle del Gimnasio
+    # 4. Bucle de simulación táctica del Gimnasio
     for combate in range(1, COMBATES_PPO + 1):
         obs = entorno.reset()
         recompensa_total = 0.0
         
-        for _ in range(60): # 60 minutos de simulación por cada ronda de combate
+        for _ in range(60): 
             obs_t = torch.tensor(obs).unsqueeze(0)
             with torch.no_grad():
                 analisis = escuela(obs_t)
@@ -183,9 +183,9 @@ def ejecutar_fabrica_local():
         if combate % 1000 == 0:
             alertar_telegram(f"🏋️ *Gym Local:* Combate [{combate}/{COMBATES_PPO}] | Retorno Táctico: {recompensa_total:.4f}")
 
-    # Guardar el cerebro final hiper-optimizado listo para el Live Trading
+    # Guardar el cerebro final hiper-optimizado listo para producción
     torch.save(bot_ppo.state_dict(), "modelo_sniper_ia.pkl")
-    alertar_telegram("🏆 *¡GRADUACIÓN ABSOLUTA CON CSV LOCAL!* El modelo `modelo_sniper_ia.pkl` ha asimilado los 4 meses y está blindado para producción.")
+    alertar_telegram("🏆 *¡GRADUACIÓN ABSOLUTA CON CSV LOCAL!* El modelo `modelo_sniper_ia.pkl` ha asimilado los 4 meses y está listo.")
     print("Proceso finalizado con éxito.")
 
 # ==============================================================================
