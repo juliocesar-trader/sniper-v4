@@ -7,32 +7,44 @@ import torch.nn as nn
 import torch.optim as optim
 from torch.optim.lr_scheduler import CosineAnnealingLR
 import telebot
-from flask import Flask
+from flask import Flask, send_file
 import threading
 
 # ==============================================================================
-# CONFIGURACIÓN DE INFRAESTRUCTURA Y TELEGRAM
+# INFRAESTRUCTURA Y LOGS DE MONITOREO EN TIEMPO REAL
 # ==============================================================================
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
 TELEGRAM_ID = os.environ.get("TELEGRAM_ID")
 bot_telegram = telebot.TeleBot(TELEGRAM_TOKEN) if TELEGRAM_TOKEN else None
 
-PROGRESO_WEB = "Iniciando motores del Gimnasio Táctico..."
+# Variables globales para la telemetría del panel visual
+ESTADISTICAS_IA = {
+    "combate_actual": 0,
+    "total_combates": 4000,
+    "estado": "Inicializando Motores...",
+    "retorno_ultimo_combate": 0.0,
+    "ratio_sharpe": 0.0,
+    "lr_actual": 0.0001,
+    "ops_long": 0,
+    "ops_short": 0,
+    "ops_espera": 0,
+    "efectividad_estimada": 0.0
+}
 
 def alertar_telegram(mensaje):
     if bot_telegram and TELEGRAM_ID:
         try:
             bot_telegram.send_message(TELEGRAM_ID, mensaje, parse_mode="Markdown")
         except Exception as e:
-            print(f"⚠️ Error Telegram: {e}")
+            print(f"⚠️ Telegram Log: {e}")
 
-# PARÁMETROS DE ENTRENAMIENTO EXTENDIDO
 VENTANA_TIEMPO = 60
-COMBATES_PPO = 4000  # Ampliado a la meta planificada
-REPORTAR_CADA = 200  # Reportes espaciados para no saturar Telegram
+COMBATES_PPO = 4000
+REPORTAR_CADA = 200
+RUTA_CEREBRO_LOCAL = "modelo_sniper_ia.pkl"
 
 # ==============================================================================
-# ARQUITECTURA DEL TRANSFORMER (Calibración exacta de Colab)
+# ARQUITECTURA RED NEURONAL TRANSFORMER
 # ==============================================================================
 class PositionalEncoding(nn.Module):
     def __init__(self, d_model=64, max_len=5000):
@@ -43,54 +55,35 @@ class PositionalEncoding(nn.Module):
         pe[:, 0::2] = torch.sin(position * div_term)
         pe[:, 1::2] = torch.cos(position * div_term)
         self.register_buffer('pe', pe.unsqueeze(0))
-    def forward(self, x): 
-        return x + self.pe[:, :x.size(1)]
+    def forward(self, x): return x + self.pe[:, :x.size(1)]
 
 class TransformerAnalista(nn.Module):
     def __init__(self, num_caracteristicas=6, d_model=64, nhead=4, num_layers=3, dropout=0.3):
         super().__init__()
         self.proyeccion_entrada = nn.Linear(num_caracteristicas, d_model)
         self.pos_encoder = PositionalEncoding(d_model)
-        
-        encoder_layer = nn.TransformerEncoderLayer(
-            d_model=d_model, 
-            nhead=nhead, 
-            dim_feedforward=128, 
-            dropout=dropout, 
-            batch_first=True
-        )
+        encoder_layer = nn.TransformerEncoderLayer(d_model=d_model, nhead=nhead, dim_feedforward=128, dropout=dropout, batch_first=True)
         self.transformer_encoder = nn.TransformerEncoder(encoder_layer, num_layers=num_layers)
-        
-        self.capa_salida = nn.Sequential(
-            nn.Linear(d_model, 32),
-            nn.ReLU(),
-            nn.Linear(32, 6)
-        )
-        
+        self.capa_salida = nn.Sequential(nn.Linear(d_model, 32), nn.ReLU(), nn.Linear(32, 6))
     def forward(self, x):
         x = self.proyeccion_entrada(x) * (64 ** 0.5)
         x = self.pos_encoder(x)
-        x = self.transformer_encoder(x)[:, -1, :]
-        return self.capa_salida(x)
+        return self.capa_salida(self.transformer_encoder(x)[:, -1, :])
 
 class AgentePPO(nn.Module):
     def __init__(self, dim_entrada=6, num_acciones=3):
         super().__init__()
         self.red = nn.Sequential(
-            nn.Linear(dim_entrada, 64),
-            nn.ReLU(),
-            nn.Linear(64, 32),
-            nn.ReLU(),
-            nn.Linear(32, num_acciones),
-            nn.Softmax(dim=-1)
+            nn.Linear(dim_entrada, 64), nn.ReLU(),
+            nn.Linear(64, 32), nn.ReLU(),
+            nn.Linear(32, num_acciones), nn.Softmax(dim=-1)
         )
-    def forward(self, x): 
-        return self.red(x)
+    def forward(self, x): return self.red(x)
 
 # ==============================================================================
-# ENTORNO DEL GIMNASIO OPERATIVO
+# ENTORNO QUANT CON RECOMPENSA DE CONSISTENCIA (SHARPE RATIO)
 # ==============================================================================
-class MercadoGimnasioLocal:
+class MercadoGimnasioFuturos:
     def __init__(self, datos_raw, precios_close, ventana=60):
         self.medias = np.mean(datos_raw, axis=0)
         self.desviaciones = np.std(datos_raw, axis=0) + 1e-8
@@ -100,44 +93,39 @@ class MercadoGimnasioLocal:
         self.reset()
 
     def reset(self):
-        self.paso_actual = np.random.randint(self.ventana, len(self.precios) - 80)
+        self.paso_actual = np.random.randint(self.ventana, len(self.precios) - 100)
         return self.datos_norm[self.paso_actual - self.ventana : self.paso_actual]
 
     def step(self, accion):
         precio_ahora = self.precios[self.paso_actual]
         precio_siguiente = self.precios[self.paso_actual + 1]
-        recompensa = 0.0
         
-        if accion == 1: # COMPRA
+        # Guardar telemetría de acciones tomadas
+        if accion == 1: ESTADISTICAS_IA["ops_long"] += 1
+        elif accion == 2: ESTADISTICAS_IA["ops_short"] += 1
+        else: ESTADISTICAS_IA["ops_espera"] += 1
+        
+        rendimiento = 0.0
+        if accion == 1:  # LONG
             rendimiento = (precio_siguiente - precio_ahora) / precio_ahora
-            recompensa = rendimiento * 100.0
-            if rendimiento < 0: recompensa *= 4.0  # Penalización más estricta para reducir margen de error
-        elif accion == 2: # VENTA
+        elif accion == 2:  # SHORT
             rendimiento = (precio_ahora - precio_siguiente) / precio_ahora
-            recompensa = rendimiento * 100.0
-            if rendimiento < 0: recompensa *= 4.0  # Penalización más estricta
             
         self.paso_actual += 1
         terminado = (self.paso_actual >= len(self.precios) - 5)
-        return self.datos_norm[self.paso_actual - self.ventana : self.paso_actual], recompensa, terminado
+        return self.datos_norm[self.paso_actual - self.ventana : self.paso_actual], rendimiento, terminado
 
 # ==============================================================================
-# EJECUCIÓN DEL APRENDIZAJE EXTENDIDO DE ALTA PRECISIÓN
+# BUCLE PRINCIPAL DE ENTRENAMIENTO GUIADO
 # ==============================================================================
-def ejecutar_fabrica_local():
-    global PROGRESO_WEB
-    print("📖 Cargando base de datos...")
-    PROGRESO_WEB = "Preparando maratón táctica de 4000 combates..."
-    
+def iniciar_gimnasio_v5():
+    global ESTADISTICAS_IA
     RUTA_CSV = "BTCUSDT_1m_Ene_Abr_2026.csv"
     RUTA_TEORICO = "Transformer_Maestro_Teorico.pt"
-    RUTA_OPERATIVO = "Bot_PPO_Rentable.pt"
     
-    for archivo in [RUTA_CSV, RUTA_TEORICO, RUTA_OPERATIVO]:
-        if not os.path.exists(archivo):
-            PROGRESO_WEB = f"❌ Error Crítico: Falta el archivo {archivo}"
-            alertar_telegram(f"❌ Falta el archivo `{archivo}` en el entorno.")
-            return
+    if not os.path.exists(RUTA_CSV) or not os.path.exists(RUTA_TEORICO):
+        ESTADISTICAS_IA["estado"] = "❌ Error: Faltan archivos CSV o PT base."
+        return
 
     try:
         df = pd.read_csv(RUTA_CSV, header=None, skiprows=1, nrows=35000, low_memory=False)
@@ -145,106 +133,168 @@ def ejecutar_fabrica_local():
         precios_close = df[4].values.astype(np.float32)
         del df
     except Exception as e:
-        PROGRESO_WEB = f"❌ Error procesando CSV: {str(e)}"
-        alertar_telegram(PROGRESO_WEB)
+        ESTADISTICAS_IA["estado"] = f"❌ Error leyendo CSV: {str(e)}"
         return
 
-    try:
-        escuela = TransformerAnalista()
-        checkpoint = torch.load(RUTA_TEORICO, map_location=torch.device('cpu'), weights_only=False)
-        escuela.load_state_dict(checkpoint['model_state_dict'])
-        escuela.eval()
-        
-        bot_ppo = AgentePPO()
+    escuela = TransformerAnalista()
+    checkpoint = torch.load(RUTA_TEORICO, map_location=torch.device('cpu'), weights_only=False)
+    escuela.load_state_dict(checkpoint['model_state_dict'])
+    escuela.eval()
+    
+    bot_ppo = AgentePPO()
+    
+    # NUEVA CARACTERÍSTICA: Si ya bajaste un cerebro y quieres continuar desde ahí,
+    # el bot automáticamente detectará el .pkl en GitHub y cargará su progreso.
+    if os.path.exists(RUTA_CEREBRO_LOCAL):
         try:
-            bot_ppo.load_state_dict(torch.load(RUTA_OPERATIVO, map_location=torch.device('cpu')))
-        except Exception:
-            print("⚠️ Nota: Ajustando capas densas operacionales dinámicamente.")
-    except Exception as e:
-        PROGRESO_WEB = f"❌ Error cargando redes neuronales: {str(e)}"
-        return
-
-    # Tasa de aprendizaje inicial fina para pulir detalles
+            bot_ppo.load_state_dict(torch.load(RUTA_CEREBRO_LOCAL, map_location=torch.device('cpu')))
+            ESTADISTICAS_IA["estado"] = "🔄 Cerebro previo detectado. Continuando evolución..."
+        except:
+            pass
+            
     optimizer_ppo = optim.Adam(bot_ppo.parameters(), lr=0.0001)
-    
-    # Reducción de margen de error: El LR Scheduler reduce la tasa de aprendizaje suavemente hasta el final
     scheduler = CosineAnnealingLR(optimizer_ppo, T_max=COMBATES_PPO, eta_min=1e-6)
-    
-    entorno = MercadoGimnasioLocal(datos_raw, precios_close, ventana=VENTANA_TIEMPO)
+    entorno = MercadoGimnasioFuturos(datos_raw, precios_close, ventana=VENTANA_TIEMPO)
     
     np.save("medias.npy", entorno.medias)
     np.save("desviaciones.npy", entorno.desviaciones)
 
-    alertar_telegram(f"🚀 *Maratón Iniciada:* Minimizando margen de error a lo largo de {COMBATES_PPO} combates.")
+    alertar_telegram("⚡ *Fénix V5 Encendido:* Entorno interactivo activado.")
+
+    ops_ganadas_acumuladas = 0
+    ops_totales_acumuladas = 0
 
     for combate in range(1, COMBATES_PPO + 1):
-        obs = entorno.reset()
-        recompensa_total = 0.0
+        ESTADISTICAS_IA["combate_actual"] = combate
+        ESTADISTICAS_IA["estado"] = "🏋️ Entrenando y Calibrando Sharpe..."
         
-        for _ in range(30): 
+        obs = entorno.reset()
+        historial_rendimientos = []
+        
+        for _ in range(30):
             obs_t = torch.tensor(obs).unsqueeze(0)
             with torch.no_grad():
-                analisis = school_output = escuela(obs_t)
+                analisis = escuela(obs_t)
             probs = bot_ppo(analisis)
             accion = torch.argmax(probs, dim=-1).item()
             
-            sig_obs, recompensa, term = entorno.step(accion)
-            recompensa_total += recompensa
+            sig_obs, rendimiento, term = entorno.step(accion)
+            historial_rendimientos.append(rendimiento)
             obs = sig_obs
             
-            loss = -torch.log(probs[0, accion] + 1e-8) * recompensa
+            if accion != 0:
+                ops_totales_acumuladas += 1
+                if rendimiento > 0: ops_ganadas_acumuladas += 1
+
+            # MATEMÁTICA DE PREMIO POR CONSISTENCIA
+            # Calculamos la recompensa final basándonos en el Sharpe de la racha de operaciones
+            if len(historial_rendimientos) > 5 and np.std(historial_rendimientos) > 0:
+                recompensa_sharpe = np.mean(historial_rendimientos) / (np.std(historial_rendimientos) + 1e-6)
+            else:
+                recompensa_sharpe = rendimiento
+                
+            loss = -torch.log(probs[0, accion] + 1e-8) * recompensa_sharpe
             optimizer_ppo.zero_grad()
-            if recompensa != 0.0:
+            if recompensa_sharpe != 0.0:
                 loss.backward()
                 optimizer_ppo.step()
-            if term: 
-                break
-        
-        # Avanzar el planificador de tasa de aprendizaje
+            if term: break
+            
         scheduler.step()
-        lr_actual = optimizer_ppo.param_groups[0]['lr']
-            
-        PROGRESO_WEB = f"🏋️ MODO PRECISIÓN: [{combate}/{COMBATES_PPO}] | Retorno: {recompensa_total:.4f} | LR: {lr_actual:.6f}"
-        time.sleep(0.002) # Velocidad máxima optimizada
-            
-        if combate % REPORTAR_CADA == 0:
-            alertar_telegram(f"📈 *Progreso Precisión:* Combate [{combate}/{COMBATES_PPO}] | Retorno Táctico: {recompensa_total:.4f} | LR: {lr_actual:.6f}")
+        
+        # Actualizar telemetría para la pantalla web
+        ESTADISTICAS_IA["retorno_ultimo_combate"] = float(np.sum(historial_rendimientos))
+        if len(historial_rendimientos) > 1 and np.std(historial_rendimientos) > 0:
+            ESTADISTICAS_IA["ratio_sharpe"] = float(np.mean(historial_rendimientos) / np.std(historial_rendimientos))
+        ESTADISTICAS_IA["lr_actual"] = float(optimizer_ppo.param_groups[0]['lr'])
+        if ops_totales_acumuladas > 0:
+            ESTADISTICAS_IA["efectividad_estimada"] = float(ops_ganadas_acumuladas / ops_totales_acumuladas * 100)
 
-    torch.save(bot_ppo.state_dict(), "modelo_sniper_ia.pkl")
-    PROGRESO_WEB = f"🏆 ¡MARATÓN COMPLETADA! {COMBATES_PPO} combates consolidados sin errores."
-    alertar_telegram(f"🏆 *Graduación de Élite:* {COMBATES_PPO} combates completados. Margen de error optimizado y guardado en `modelo_sniper_ia.pkl`.")
+        if combate % REPORTAR_CADA == 0:
+            torch.save(bot_ppo.state_dict(), RUTA_CEREBRO_LOCAL)
+            alertar_telegram(f"📌 *Punto de Control:* Combate [{combate}/{COMBATES_PPO}] | Sharpe: {ESTADISTICAS_IA['ratio_sharpe']:.4f} | Efectividad: {ESTADISTICAS_IA['efectividad_estimada']:.2f}%")
+
+    torch.save(bot_ppo.state_dict(), RUTA_CEREBRO_LOCAL)
+    ESTADISTICAS_IA["estado"] = "🏆 ¡GRADUACIÓN COMPLETADA! Modelo Sniper Élite consolidado."
 
 # ==============================================================================
-# INTERFAZ DE PERSISTENCIA FLASK
+# INTERFAZ DE CONTROL E INYECCIÓN HUMANA (FLASK INTERACTIVO)
 # ==============================================================================
 app = Flask(__name__)
 
 @app.route('/')
-def index(): 
-    global PROGRESO_WEB
+def index():
+    color_sharpe = "#00ffcc" if ESTADISTICAS_IA["ratio_sharpe"] >= 0 else "#ff3333"
+    color_efectividad = "#ffff00" if ESTADISTICAS_IA["efectividad_estimada"] >= 60.0 else "#aaaaaa"
+    
     return f"""
     <html>
-        <head><title>Panel Sniper V4 - Élite</title><meta http-equiv="refresh" content="5"></head>
-        <body style="font-family:sans-serif; padding:20px; text-align:center; background:#111; color:#fff;">
-            <h2>🤖 Fábrica del Cerebro Sniper V4 (4K Máxima Precisión) 🤖</h2>
-            <hr style="border-color:#333;">
-            <div style="padding:20px; background:#222; border-radius:8px; display:inline-block; margin-top:20px; border:1px solid #444;">
-                <p style="font-size:18px; color:#00ffcc; font-weight:bold;">{PROGRESO_WEB}</p>
+        <head>
+            <title>Gimnasio Sniper V5 - Élite</title>
+            <meta http-equiv="refresh" content="3">
+            <style>
+                body {{ font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background:#0a0a14; color:#fff; text-align:center; padding:30px; }}
+                .container {{ max-width: 700px; margin: 0 auto; background: #121224; padding: 25px; border-radius: 12px; border: 1px solid #23234b; box-shadow: 0 8px 24px rgba(0,0,0,0.6); }}
+                .grid {{ display: grid; grid-template-columns: 1fr 1fr; gap: 15px; text-align: left; margin-top: 20px; }}
+                .card {{ background: #1a1a36; padding: 15px; border-radius: 6px; border: 1px solid #2d2d5f; }}
+                .btn {{ display: inline-block; background: #ff5500; color: white; font-weight: bold; padding: 12px 24px; text-decoration: none; border-radius: 6px; border: 1px solid #fff; margin-top: 15px; transition: 0.3s; }}
+                .btn:hover {{ background: #ff7733; }}
+                h2 {{ color: #00ffcc; margin-bottom: 5px; }}
+            </style>
+        </head>
+        <body>
+            <div class="container">
+                <h2>📊 Panel Operativo: Sniper V5 Élite 📊</h2>
+                <p style="color:#aaa; font-size:14px; margin-top:0;">Gimnasio Quant de Aprendizaje por Consistencia (Binance Futuros)</p>
+                
+                <div style="padding:15px; background:#1f1f3d; border-radius:8px; font-size:18px; font-weight:bold; color:#ffcc00; border-left: 5px solid #ffcc00;">
+                    {ESTADISTICAS_IA["estado"]}
+                </div>
+
+                <div class="grid">
+                    <div class="card">
+                        <p>🎯 <b>Combate:</b> {ESTADISTICAS_IA["combate_actual"]} / {ESTADISTICAS_IA["total_combates"]}</p>
+                        <p>📉 <b>Learning Rate:</b> <span style="color:#00ffcc;">{ESTADISTICAS_IA["lr_actual"]:.7f}</span></p>
+                        <p>📈 <b>Retorno Última Racha:</b> {ESTADISTICAS_IA["retorno_ultimo_combate"]:.5f}</p>
+                    </div>
+                    <div class="card">
+                        <p>📊 <b>Ratio Sharpe:</b> <span style="color:{color_sharpe}; font-size:18px; font-weight:bold;">{ESTADISTICAS_IA["ratio_sharpe"]:.4f}</span></p>
+                        <p>🔥 <b>Efectividad Acumulada:</b> <span style="color:{color_efectividad}; font-size:18px; font-weight:bold;">{ESTADISTICAS_IA["efectividad_estimada"]:.2f}%</span></p>
+                    </div>
+                </div>
+
+                <h3 style="text-align:left; color:#ffcc00; margin-top:25px; margin-bottom:5px;">🧩 Comportamiento Conductual en Vivo:</h3>
+                <div class="grid" style="grid-template-columns: 1fr 1fr 1fr; font-size:14px;">
+                    <div class="card" style="text-align:center; border-color:#00ff55;">🟢 <b>LONGs:</b> {ESTADISTICAS_IA["ops_long"]}</div>
+                    <div class="card" style="text-align:center; border-color:#ff3333;">🔴 <b>SHORTs:</b> {ESTADISTICAS_IA["ops_short"]}</div>
+                    <div class="card" style="text-align:center; border-color:#888;">💤 <b>ESPERAs:</b> {ESTADISTICAS_IA["ops_espera"]}</div>
+                </div>
+
+                <br><hr style="border-color:#23234b;"><br>
+                
+                <div style="background:#221133; padding:15px; border-radius:8px; border:1px solid #4a157d;">
+                    🚨 <b>SISTEMA INTERACTIVO HUMAN-IN-THE-LOOP:</b><br>
+                    Si notas un mal comportamiento o quieres inyectar código nuevo, descarga el cerebro de inmediato:<br>
+                    <a href="/descargar_cerebro" class="btn">📥 DESCARGAR CEREBRO (.PKL) POR CHROME</a>
+                </div>
             </div>
-            <p style="font-size:12px; color:#666; margin-top:30px;">La página se refresca automáticamente cada 5 segundos.</p>
         </body>
     </html>
     """
 
+@app.route('/descargar_cerebro')
+def descargar_cerebro():
+    if os.path.exists(RUTA_CEREBRO_LOCAL):
+        return send_file(RUTA_CEREBRO_LOCAL, as_attachment=True)
+    else:
+        return "❌ Alerta: El archivo .pkl aún no se ha consolidado en el disco de Render."
+
 if __name__ == "__main__":
     puerto = int(os.environ.get("PORT", 10000))
-    
-    def arrancar_proceso():
-        time.sleep(4)
-        ejecutar_fabrica_local()
-        
-    hilo = threading.Thread(target=arrancar_proceso)
-    hilo.daemon = True
-    hilo.start()
-    
+    def arrancar():
+        time.sleep(3)
+        iniciar_gimnasio_v5()
+    t = threading.Thread(target=arrancar)
+    t.daemon = True
+    t.start()
     app.run(host="0.0.0.0", port=puerto)
