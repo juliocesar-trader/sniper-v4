@@ -11,6 +11,12 @@ from flask import Flask, send_file
 import threading
 
 # ==============================================================================
+# 🎯 CONTROL DE VERSIONES DEL CEREBRO (SISTEMA DE SEGURIDAD)
+# ==============================================================================
+# Cambia este texto si en el futuro subes el "modelo_sniper_ia (5).pkl", etc.
+CEREBRO_A_ENTRENAR = "modelo_sniper_ia (4).pkl"
+
+# ==============================================================================
 # 🛰️ CONFIGURACIÓN DE TELEMETRÍA Y CONTROL GLOBAL
 # ==============================================================================
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
@@ -44,8 +50,6 @@ def alertar_telegram(mensaje):
 VENTANA_TIEMPO = 60
 COMBATES_PPO = 4000
 REPORTAR_CADA = 200
-# El script buscará el archivo que acabas de subir a GitHub en la raíz
-RUTA_CEREBRO_LOCAL = "modelo_sniper_ia.pkl"
 
 # ==============================================================================
 # 🧠 ARQUITECTURA RED NEURONAL TRANSFORMER
@@ -132,18 +136,17 @@ class MercadoGimnasioAres:
         # 🎰 SISTEMA DE RECOMPENSAS AVANZADO (ARES)
         recompensa = rendimiento
         
-        # Filtro de volumen institucional: Si opera a favor con volumen alto, premiamos
+        # Filtro de volumen institucional
         if accion != 0 and volumen_ahora > volumen_promedio * 1.5:
-            recompensa *= 1.3  # Incentivo de volumen institucional
+            recompensa *= 1.3  
             
-        # Filtro ATR: Si entra al mercado cuando el ATR está muerto, reducimos premio
+        # Filtro ATR (Evitar laterales muertos)
         if accion != 0 and atr_estimado < (np.mean(self.precios) * 0.0005):
-            recompensa *= 0.7  # Penalización por operar en mercado lateral sin fuerza
+            recompensa *= 0.7  
             
         # 🔴 MEJORA 3: PENALIZACIÓN POR INACTIVIDAD ABSURDA
-        # Si acumula más de 7 minutos en ESPERA mientras el volumen explota, le aplicamos multa
         if accion == 0 and self.conteo_esperas_seguidas > 7 and volumen_ahora > volumen_promedio:
-            recompensa = -0.0002  # Pequeño castigo matemático por cobardía operativa
+            recompensa = -0.0002  
             
         self.paso_actual += 1
         terminado = (self.paso_actual >= len(self.precios) - 5)
@@ -178,14 +181,16 @@ def iniciar_gimnasio_v5_1():
     
     bot_ppo = AgentePPO()
     
-    # INYECCIÓN EXCLUSIVA DEL CEREBRO PREVIO (.PKL SUBIDO POR EL USUARIO)
-    if os.path.exists(RUTA_CEREBRO_LOCAL):
+    # INYECCIÓN DEL CEREBRO SELECCIONADO POR EL USUARIO
+    if os.path.exists(CEREBRO_A_ENTRENAR):
         try:
-            bot_ppo.load_state_dict(torch.load(RUTA_CEREBRO_LOCAL, map_location=torch.device('cpu')))
-            ESTADISTICAS_IA["estado"] = "🔄 ¡CEREBRO PREVIO DETECTADO! Heredando memoria táctica..."
-            print("🧠 Éxito: Pesos neuronales inyectados desde el repositorio.")
+            bot_ppo.load_state_dict(torch.load(CEREBRO_A_ENTRENAR, map_location=torch.device('cpu')))
+            ESTADISTICAS_IA["estado"] = f"🔄 Memoria táctica inyectada desde: {CEREBRO_A_ENTRENAR}"
+            print(f"🧠 Éxito: Pesos neuronales cargados desde {CEREBRO_A_ENTRENAR}")
         except Exception as e:
-            ESTADISTICAS_IA["estado"] = f"⚠️ Error inyectando cerebro: {str(e)}. Iniciando base..."
+            ESTADISTICAS_IA["estado"] = f"⚠️ Error cargando {CEREBRO_A_ENTRENAR}: {str(e)}. Base limpia activa."
+    else:
+        ESTADISTICAS_IA["estado"] = f"⚠️ Archivo {CEREBRO_A_ENTRENAR} no hallado en raíz. Iniciando red virgen."
             
     optimizer_ppo = optim.Adam(bot_ppo.parameters(), lr=0.0001)
     scheduler = CosineAnnealingLR(optimizer_ppo, T_max=COMBATES_PPO, eta_min=1e-6)
@@ -194,14 +199,14 @@ def iniciar_gimnasio_v5_1():
     np.save("medias.npy", entorno.medias)
     np.save("desviaciones.npy", entorno.desviaciones)
 
-    alertar_telegram("🚀 *Ares V5.1 Conectado:* Sincronización de cerebro completada e indicadores listos.")
+    alertar_telegram(f"🚀 *Ares V5.1 Conectado:* Sincronizado con cerebro: {CEREBRO_A_ENTRENAR}")
 
     ops_ganadas_acumuladas = 0
     ops_totales_acumuladas = 0
 
     for combate in range(1, COMBATES_PPO + 1):
         ESTADISTICAS_IA["combate_actual"] = combate
-        if "Heredando" not in ESTADISTICAS_IA["estado"]:
+        if "inyectada" not in ESTADISTICAS_IA["estado"]:
             ESTADISTICAS_IA["estado"] = "🎯 Calibrando Sharpe con Filtros Avanzados (Ares)..."
         
         obs = entorno.reset()
@@ -210,7 +215,7 @@ def iniciar_gimnasio_v5_1():
         for _ in range(30):
             obs_t = torch.tensor(obs).unsqueeze(0)
             with torch.no_grad():
-                analisis = escuela(obs_t)
+                analisis = school_output = escuela(obs_t)
             probs = bot_ppo(analisis)
             accion = torch.argmax(probs, dim=-1).item()
             
@@ -218,13 +223,12 @@ def iniciar_gimnasio_v5_1():
             historial_rendimientos.append(rendimiento)
             obs = sig_obs
             
-            # 💰 CONTABILIDAD EN VIVO EN DÓLARES (Apalancamiento básico 1x)
+            # 💰 CONTABILIDAD FINANCIERA EN DÓLARES (Apalancamiento 1x)
             if accion != 0:
                 ops_totales_acumuladas += 1
                 impacto_monetario = ESTADISTICAS_IA["balance_usd"] * rendimiento
                 ESTADISTICAS_IA["balance_usd"] += impacto_monetario
                 ESTADISTICAS_IA["pnl_total_usd"] = ESTADISTICAS_IA["balance_usd"] - 1000.0
-                
                 if rendimiento > 0: ops_ganadas_acumuladas += 1
 
             loss = -torch.log(probs[0, accion] + 1e-8) * recompensa
@@ -244,10 +248,10 @@ def iniciar_gimnasio_v5_1():
             ESTADISTICAS_IA["efectividad_estimada"] = float(ops_ganadas_acumuladas / ops_totales_acumuladas * 100)
 
         if combate % REPORTAR_CADA == 0:
-            torch.save(bot_ppo.state_dict(), RUTA_CEREBRO_LOCAL)
-            alertar_telegram(f"⚡ *Ares Control:* [{combate}/{COMBATES_PPO}] | Billetera: ${ESTADISTICAS_IA['balance_usd']:.2f} USD | Sharpe: {ESTADISTICAS_IA['ratio_sharpe']:.4f}")
+            torch.save(bot_ppo.state_dict(), CEREBRO_A_ENTRENAR)
+            alertar_telegram(f"⚡ *Ares:* [{combate}/{COMBATES_PPO}] | Billetera: ${ESTADISTICAS_IA['balance_usd']:.2f} USD | Sharpe: {ESTADISTICAS_IA['ratio_sharpe']:.4f}")
 
-    torch.save(bot_ppo.state_dict(), RUTA_CEREBRO_LOCAL)
+    torch.save(bot_ppo.state_dict(), CEREBRO_A_ENTRENAR)
     ESTADISTICAS_IA["estado"] = "🏆 ¡EVOLUCIÓN MÁXIMA! Francotirador de Élite Graduado."
 
 # ==============================================================================
@@ -323,7 +327,7 @@ def index():
                 
                 <div style="background:#221133; padding:15px; border-radius:8px; border:1px solid #4a157d;">
                     🚨 <b>SISTEMA INTERACTIVO HUMAN-IN-THE-LOOP:</b><br>
-                    Descarga el cerebro de forma manual en cualquier momento:<br>
+                    Descarga el cerebro activo en cualquier momento:<br>
                     <a href="/descargar_cerebro" class="btn">📥 DESCARGAR CEREBRO (.PKL) POR CHROME</a>
                 </div>
             </div>
@@ -333,10 +337,10 @@ def index():
 
 @app.route('/descargar_cerebro')
 def descargar_cerebro():
-    if os.path.exists(RUTA_CEREBRO_LOCAL):
-        return send_file(RUTA_CEREBRO_LOCAL, as_attachment=True)
+    if os.path.exists(CEREBRO_A_ENTRENAR):
+        return send_file(CEREBRO_A_ENTRENAR, as_attachment=True)
     else:
-        return "❌ Alerta: Archivo pkl no consolidado en disco."
+        return f"❌ Alerta: El archivo {CEREBRO_A_ENTRENAR} no se encuentra consolidado en disco."
 
 if __name__ == "__main__":
     puerto = int(os.environ.get("PORT", 10000))
