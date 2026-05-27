@@ -11,24 +11,27 @@ from flask import Flask, send_file
 import threading
 
 # ==============================================================================
-# INFRAESTRUCTURA Y LOGS DE MONITOREO EN TIEMPO REAL
+# 🛰️ CONFIGURACIÓN DE TELEMETRÍA Y CONTROL GLOBAL
 # ==============================================================================
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
 TELEGRAM_ID = os.environ.get("TELEGRAM_ID")
 bot_telegram = telebot.TeleBot(TELEGRAM_TOKEN) if TELEGRAM_TOKEN else None
 
-# Variables globales para la telemetría del panel visual
 ESTADISTICAS_IA = {
     "combate_actual": 0,
     "total_combates": 4000,
-    "estado": "Inicializando Motores...",
+    "estado": "Inicializando Sensores Ares...",
     "retorno_ultimo_combate": 0.0,
     "ratio_sharpe": 0.0,
     "lr_actual": 0.0001,
     "ops_long": 0,
     "ops_short": 0,
     "ops_espera": 0,
-    "efectividad_estimada": 0.0
+    "efectividad_estimada": 0.0,
+    "balance_usd": 1000.0,       # Billetera simulada inicial
+    "pnl_total_usd": 0.0,        # Rendimiento acumulado en dólares
+    "atr_actual": 0.0,           # Telemetría de Volatilidad
+    "volumen_actual": 0.0        # Telemetría de Volumen Institucional
 }
 
 def alertar_telegram(mensaje):
@@ -41,10 +44,11 @@ def alertar_telegram(mensaje):
 VENTANA_TIEMPO = 60
 COMBATES_PPO = 4000
 REPORTAR_CADA = 200
+# El script buscará el archivo que acabas de subir a GitHub en la raíz
 RUTA_CEREBRO_LOCAL = "modelo_sniper_ia.pkl"
 
 # ==============================================================================
-# ARQUITECTURA RED NEURONAL TRANSFORMER
+# 🧠 ARQUITECTURA RED NEURONAL TRANSFORMER
 # ==============================================================================
 class PositionalEncoding(nn.Module):
     def __init__(self, d_model=64, max_len=5000):
@@ -81,26 +85,36 @@ class AgentePPO(nn.Module):
     def forward(self, x): return self.red(x)
 
 # ==============================================================================
-# ENTORNO QUANT CON RECOMPENSA DE CONSISTENCIA (SHARPE RATIO)
+# 🎯 ENTORNO QUANT CON MATRIZ DE RECOMPENSA "ARES" (ATR + VOLUMEN + MULTAS)
 # ==============================================================================
-class MercadoGimnasioFuturos:
-    def __init__(self, datos_raw, precios_close, ventana=60):
+class MercadoGimnasioAres:
+    def __init__(self, datos_raw, precios_close, volumen_raw, ventana=60):
         self.medias = np.mean(datos_raw, axis=0)
         self.desviaciones = np.std(datos_raw, axis=0) + 1e-8
         self.datos_norm = (datos_raw - self.medias) / self.desviaciones
         self.precios = precios_close
+        self.volumen = volumen_raw
         self.ventana = ventana
         self.reset()
 
     def reset(self):
-        self.paso_actual = np.random.randint(self.ventana, len(self.precios) - 100)
+        self.paso_actual = np.random.randint(self.ventana + 20, len(self.precios) - 100)
+        self.conteo_esperas_seguidas = 0
         return self.datos_norm[self.paso_actual - self.ventana : self.paso_actual]
 
     def step(self, accion):
         precio_ahora = self.precios[self.paso_actual]
         precio_siguiente = self.precios[self.paso_actual + 1]
+        volumen_ahora = self.volumen[self.paso_actual]
         
-        # Guardar telemetría de acciones tomadas
+        # 🟢 MEJORA 1 & 2: CÁLCULO EN VIVO DE INDICE ATR Y VOLUMEN PROMEDIO
+        precios_ventana = self.precios[self.paso_actual - 14 : self.paso_actual]
+        atr_estimado = np.max(precios_ventana) - np.min(precios_ventana)
+        volumen_promedio = np.mean(self.volumen[self.paso_actual - 14 : self.paso_actual]) + 1e-6
+        
+        ESTADISTICAS_IA["atr_actual"] = float(atr_estimado)
+        ESTADISTICAS_IA["volumen_actual"] = float(volumen_ahora)
+
         if accion == 1: ESTADISTICAS_IA["ops_long"] += 1
         elif accion == 2: ESTADISTICAS_IA["ops_short"] += 1
         else: ESTADISTICAS_IA["ops_espera"] += 1
@@ -108,32 +122,53 @@ class MercadoGimnasioFuturos:
         rendimiento = 0.0
         if accion == 1:  # LONG
             rendimiento = (precio_siguiente - precio_ahora) / precio_ahora
+            self.conteo_esperas_seguidas = 0
         elif accion == 2:  # SHORT
             rendimiento = (precio_ahora - precio_siguiente) / precio_ahora
+            self.conteo_esperas_seguidas = 0
+        else:  # ESPERA
+            self.conteo_esperas_seguidas += 1
+
+        # 🎰 SISTEMA DE RECOMPENSAS AVANZADO (ARES)
+        recompensa = rendimiento
+        
+        # Filtro de volumen institucional: Si opera a favor con volumen alto, premiamos
+        if accion != 0 and volumen_ahora > volumen_promedio * 1.5:
+            recompensa *= 1.3  # Incentivo de volumen institucional
+            
+        # Filtro ATR: Si entra al mercado cuando el ATR está muerto, reducimos premio
+        if accion != 0 and atr_estimado < (np.mean(self.precios) * 0.0005):
+            recompensa *= 0.7  # Penalización por operar en mercado lateral sin fuerza
+            
+        # 🔴 MEJORA 3: PENALIZACIÓN POR INACTIVIDAD ABSURDA
+        # Si acumula más de 7 minutos en ESPERA mientras el volumen explota, le aplicamos multa
+        if accion == 0 and self.conteo_esperas_seguidas > 7 and volumen_ahora > volumen_promedio:
+            recompensa = -0.0002  # Pequeño castigo matemático por cobardía operativa
             
         self.paso_actual += 1
         terminado = (self.paso_actual >= len(self.precios) - 5)
-        return self.datos_norm[self.paso_actual - self.ventana : self.paso_actual], rendimiento, terminado
+        return self.datos_norm[self.paso_actual - self.ventana : self.paso_actual], recompensa, rendimiento, terminado
 
 # ==============================================================================
-# BUCLE PRINCIPAL DE ENTRENAMIENTO GUIADO
+# 🏋️ BUCLE DE EVOLUCIÓN QUANT CONTINUA
 # ==============================================================================
-def iniciar_gimnasio_v5():
+def iniciar_gimnasio_v5_1():
     global ESTADISTICAS_IA
     RUTA_CSV = "BTCUSDT_1m_Ene_Abr_2026.csv"
     RUTA_TEORICO = "Transformer_Maestro_Teorico.pt"
     
     if not os.path.exists(RUTA_CSV) or not os.path.exists(RUTA_TEORICO):
-        ESTADISTICAS_IA["estado"] = "❌ Error: Faltan archivos CSV o PT base."
+        ESTADISTICAS_IA["estado"] = "❌ Alerta: Faltan archivos históricos CSV o pesos base PT."
         return
 
     try:
         df = pd.read_csv(RUTA_CSV, header=None, skiprows=1, nrows=35000, low_memory=False)
         datos_raw = df[[1, 2, 3, 4, 5, 4]].values.astype(np.float32)
         precios_close = df[4].values.astype(np.float32)
+        volumen_raw = df[5].values.astype(np.float32)
         del df
     except Exception as e:
-        ESTADISTICAS_IA["estado"] = f"❌ Error leyendo CSV: {str(e)}"
+        ESTADISTICAS_IA["estado"] = f"❌ Error de procesamiento CSV: {str(e)}"
         return
 
     escuela = TransformerAnalista()
@@ -143,30 +178,31 @@ def iniciar_gimnasio_v5():
     
     bot_ppo = AgentePPO()
     
-    # NUEVA CARACTERÍSTICA: Si ya bajaste un cerebro y quieres continuar desde ahí,
-    # el bot automáticamente detectará el .pkl en GitHub y cargará su progreso.
+    # INYECCIÓN EXCLUSIVA DEL CEREBRO PREVIO (.PKL SUBIDO POR EL USUARIO)
     if os.path.exists(RUTA_CEREBRO_LOCAL):
         try:
             bot_ppo.load_state_dict(torch.load(RUTA_CEREBRO_LOCAL, map_location=torch.device('cpu')))
-            ESTADISTICAS_IA["estado"] = "🔄 Cerebro previo detectado. Continuando evolución..."
-        except:
-            pass
+            ESTADISTICAS_IA["estado"] = "🔄 ¡CEREBRO PREVIO DETECTADO! Heredando memoria táctica..."
+            print("🧠 Éxito: Pesos neuronales inyectados desde el repositorio.")
+        except Exception as e:
+            ESTADISTICAS_IA["estado"] = f"⚠️ Error inyectando cerebro: {str(e)}. Iniciando base..."
             
     optimizer_ppo = optim.Adam(bot_ppo.parameters(), lr=0.0001)
     scheduler = CosineAnnealingLR(optimizer_ppo, T_max=COMBATES_PPO, eta_min=1e-6)
-    entorno = MercadoGimnasioFuturos(datos_raw, precios_close, ventana=VENTANA_TIEMPO)
+    entorno = MercadoGimnasioAres(datos_raw, precios_close, volumen_raw, ventana=VENTANA_TIEMPO)
     
     np.save("medias.npy", entorno.medias)
     np.save("desviaciones.npy", entorno.desviaciones)
 
-    alertar_telegram("⚡ *Fénix V5 Encendido:* Entorno interactivo activado.")
+    alertar_telegram("🚀 *Ares V5.1 Conectado:* Sincronización de cerebro completada e indicadores listos.")
 
     ops_ganadas_acumuladas = 0
     ops_totales_acumuladas = 0
 
     for combate in range(1, COMBATES_PPO + 1):
         ESTADISTICAS_IA["combate_actual"] = combate
-        ESTADISTICAS_IA["estado"] = "🏋️ Entrenando y Calibrando Sharpe..."
+        if "Heredando" not in ESTADISTICAS_IA["estado"]:
+            ESTADISTICAS_IA["estado"] = "🎯 Calibrando Sharpe con Filtros Avanzados (Ares)..."
         
         obs = entorno.reset()
         historial_rendimientos = []
@@ -178,31 +214,28 @@ def iniciar_gimnasio_v5():
             probs = bot_ppo(analisis)
             accion = torch.argmax(probs, dim=-1).item()
             
-            sig_obs, rendimiento, term = entorno.step(accion)
+            sig_obs, recompensa, rendimiento, term = entorno.step(accion)
             historial_rendimientos.append(rendimiento)
             obs = sig_obs
             
+            # 💰 CONTABILIDAD EN VIVO EN DÓLARES (Apalancamiento básico 1x)
             if accion != 0:
                 ops_totales_acumuladas += 1
+                impacto_monetario = ESTADISTICAS_IA["balance_usd"] * rendimiento
+                ESTADISTICAS_IA["balance_usd"] += impacto_monetario
+                ESTADISTICAS_IA["pnl_total_usd"] = ESTADISTICAS_IA["balance_usd"] - 1000.0
+                
                 if rendimiento > 0: ops_ganadas_acumuladas += 1
 
-            # MATEMÁTICA DE PREMIO POR CONSISTENCIA
-            # Calculamos la recompensa final basándonos en el Sharpe de la racha de operaciones
-            if len(historial_rendimientos) > 5 and np.std(historial_rendimientos) > 0:
-                recompensa_sharpe = np.mean(historial_rendimientos) / (np.std(historial_rendimientos) + 1e-6)
-            else:
-                recompensa_sharpe = rendimiento
-                
-            loss = -torch.log(probs[0, accion] + 1e-8) * recompensa_sharpe
+            loss = -torch.log(probs[0, accion] + 1e-8) * recompensa
             optimizer_ppo.zero_grad()
-            if recompensa_sharpe != 0.0:
+            if recompensa != 0.0:
                 loss.backward()
                 optimizer_ppo.step()
             if term: break
             
         scheduler.step()
         
-        # Actualizar telemetría para la pantalla web
         ESTADISTICAS_IA["retorno_ultimo_combate"] = float(np.sum(historial_rendimientos))
         if len(historial_rendimientos) > 1 and np.std(historial_rendimientos) > 0:
             ESTADISTICAS_IA["ratio_sharpe"] = float(np.mean(historial_rendimientos) / np.std(historial_rendimientos))
@@ -212,25 +245,27 @@ def iniciar_gimnasio_v5():
 
         if combate % REPORTAR_CADA == 0:
             torch.save(bot_ppo.state_dict(), RUTA_CEREBRO_LOCAL)
-            alertar_telegram(f"📌 *Punto de Control:* Combate [{combate}/{COMBATES_PPO}] | Sharpe: {ESTADISTICAS_IA['ratio_sharpe']:.4f} | Efectividad: {ESTADISTICAS_IA['efectividad_estimada']:.2f}%")
+            alertar_telegram(f"⚡ *Ares Control:* [{combate}/{COMBATES_PPO}] | Billetera: ${ESTADISTICAS_IA['balance_usd']:.2f} USD | Sharpe: {ESTADISTICAS_IA['ratio_sharpe']:.4f}")
 
     torch.save(bot_ppo.state_dict(), RUTA_CEREBRO_LOCAL)
-    ESTADISTICAS_IA["estado"] = "🏆 ¡GRADUACIÓN COMPLETADA! Modelo Sniper Élite consolidado."
+    ESTADISTICAS_IA["estado"] = "🏆 ¡EVOLUCIÓN MÁXIMA! Francotirador de Élite Graduado."
 
 # ==============================================================================
-# INTERFAZ DE CONTROL E INYECCIÓN HUMANA (FLASK INTERACTIVO)
+# 📺 INTERFAZ INTERACTIVA PREMIUM (FLASK HTML)
 # ==============================================================================
 app = Flask(__name__)
 
 @app.route('/')
 def index():
     color_sharpe = "#00ffcc" if ESTADISTICAS_IA["ratio_sharpe"] >= 0 else "#ff3333"
-    color_efectividad = "#ffff00" if ESTADISTICAS_IA["efectividad_estimada"] >= 60.0 else "#aaaaaa"
+    color_efectividad = "#ffff00" if ESTADISTICAS_IA["efectividad_estimada"] >= 50.0 else "#aaaaaa"
+    color_pnl = "#00ff55" if ESTADISTICAS_IA["pnl_total_usd"] >= 0 else "#ff3333"
+    signo_pnl = "+" if ESTADISTICAS_IA["pnl_total_usd"] >= 0 else ""
     
     return f"""
     <html>
         <head>
-            <title>Gimnasio Sniper V5 - Élite</title>
+            <title>Gimnasio Sniper V5.1 - Ares Élite</title>
             <meta http-equiv="refresh" content="3">
             <style>
                 body {{ font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background:#0a0a14; color:#fff; text-align:center; padding:30px; }}
@@ -240,15 +275,23 @@ def index():
                 .btn {{ display: inline-block; background: #ff5500; color: white; font-weight: bold; padding: 12px 24px; text-decoration: none; border-radius: 6px; border: 1px solid #fff; margin-top: 15px; transition: 0.3s; }}
                 .btn:hover {{ background: #ff7733; }}
                 h2 {{ color: #00ffcc; margin-bottom: 5px; }}
+                .billetera {{ background: #13271b; border: 2px solid #00ff55; padding: 15px; border-radius: 8px; margin-top: 15px; text-align: center; }}
+                .indicadores {{ background: #1c1c38; border: 1px dashed #00ffcc; padding: 12px; border-radius: 6px; margin-top: 15px; text-align: left; }}
             </style>
         </head>
         <body>
             <div class="container">
-                <h2>📊 Panel Operativo: Sniper V5 Élite 📊</h2>
+                <h2>📊 Panel Operativo: V5.1 - Ares Élite 📊</h2>
                 <p style="color:#aaa; font-size:14px; margin-top:0;">Gimnasio Quant de Aprendizaje por Consistencia (Binance Futuros)</p>
                 
-                <div style="padding:15px; background:#1f1f3d; border-radius:8px; font-size:18px; font-weight:bold; color:#ffcc00; border-left: 5px solid #ffcc00;">
+                <div style="padding:15px; background:#1f1f3d; border-radius:8px; font-size:16px; font-weight:bold; color:#ffcc00; border-left: 5px solid #ffcc00;">
                     {ESTADISTICAS_IA["estado"]}
+                </div>
+
+                <div class="billetera">
+                    <span style="color:#aaa; font-size:13px; font-weight:bold; letter-spacing:1px;">💰 BILLETERA SIMULADA EN TIEMPO REAL 💰</span>
+                    <h1 style="margin: 5px 0 0 0; color:#00ff55; font-size:36px;">${ESTADISTICAS_IA["balance_usd"]:.2f} <span style="font-size:18px; color:#aaa;">USD</span></h1>
+                    <p style="margin:2px 0 0 0; font-size:15px; font-weight:bold; color:{color_pnl};">Rendimiento: {signo_pnl}${ESTADISTICAS_IA["pnl_total_usd"]:.2f} USD</p>
                 </div>
 
                 <div class="grid">
@@ -263,8 +306,14 @@ def index():
                     </div>
                 </div>
 
-                <h3 style="text-align:left; color:#ffcc00; margin-top:25px; margin-bottom:5px;">🧩 Comportamiento Conductual en Vivo:</h3>
-                <div class="grid" style="grid-template-columns: 1fr 1fr 1fr; font-size:14px;">
+                <div class="indicadores">
+                    <h4 style="margin:0 0 8px 0; color:#00ffcc; text-transform:uppercase; font-size:13px;">⚙️ Filtros de Entrada Radáricos (Ares):</h4>
+                    <p style="margin:4px 0;">⚡ <b>ATR (Volatilidad de Rango Abierto):</b> <span style="color:#ffff00;">{ESTADISTICAS_IA["atr_actual"]:.4f}</span></p>
+                    <p style="margin:4px 0;">📊 <b>Volumen Institucional Actual:</b> <span style="color:#00ff55;">{ESTADISTICAS_IA["volumen_actual"]:.1f} m³</span></p>
+                </div>
+
+                <h3 style="text-align:left; color:#ffcc00; margin-top:20px; margin-bottom:5px;">🧩 Comportamiento Conductual en Vivo:</h3>
+                <div class="grid" style="grid-template-columns: 1fr 1fr 1fr; font-size:14px; margin-top:5px;">
                     <div class="card" style="text-align:center; border-color:#00ff55;">🟢 <b>LONGs:</b> {ESTADISTICAS_IA["ops_long"]}</div>
                     <div class="card" style="text-align:center; border-color:#ff3333;">🔴 <b>SHORTs:</b> {ESTADISTICAS_IA["ops_short"]}</div>
                     <div class="card" style="text-align:center; border-color:#888;">💤 <b>ESPERAs:</b> {ESTADISTICAS_IA["ops_espera"]}</div>
@@ -274,7 +323,7 @@ def index():
                 
                 <div style="background:#221133; padding:15px; border-radius:8px; border:1px solid #4a157d;">
                     🚨 <b>SISTEMA INTERACTIVO HUMAN-IN-THE-LOOP:</b><br>
-                    Si notas un mal comportamiento o quieres inyectar código nuevo, descarga el cerebro de inmediato:<br>
+                    Descarga el cerebro de forma manual en cualquier momento:<br>
                     <a href="/descargar_cerebro" class="btn">📥 DESCARGAR CEREBRO (.PKL) POR CHROME</a>
                 </div>
             </div>
@@ -287,13 +336,13 @@ def descargar_cerebro():
     if os.path.exists(RUTA_CEREBRO_LOCAL):
         return send_file(RUTA_CEREBRO_LOCAL, as_attachment=True)
     else:
-        return "❌ Alerta: El archivo .pkl aún no se ha consolidado en el disco de Render."
+        return "❌ Alerta: Archivo pkl no consolidado en disco."
 
 if __name__ == "__main__":
     puerto = int(os.environ.get("PORT", 10000))
     def arrancar():
         time.sleep(3)
-        iniciar_gimnasio_v5()
+        iniciar_gimnasio_v5_1()
     t = threading.Thread(target=arrancar)
     t.daemon = True
     t.start()
