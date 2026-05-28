@@ -12,9 +12,8 @@ import threading
 import requests
 
 # ==============================================================================
-# 🎯 CONTROL DE VERSIONES Y CONFIGURACIÓN CLOUD PERPETUA (V8.0 PERPETUAL-EVO)
+# 🎯 CONTROL DE VERSIONES Y CONFIGURACIÓN CLOUD PERPETUA (V8.2 FIXED)
 # ==============================================================================
-# 🔥 CORRECCIÓN: Apuntando al archivo histórico y al modelo exacto de tu GitHub
 RUTA_CSV = "BTCUSDT_1m_Ene_Abr_2026.csv"
 CEREBRO_A_ENTRENAR = "modelo_sniper_ia (4) (2).pkl"
 
@@ -29,7 +28,7 @@ DBX_REFRESH_TOKEN = os.environ.get("DROPBOX_REFRESH_TOKEN")
 ESTADISTICAS_IA = {
     "combate_actual": 0,
     "total_combates": 4000,
-    "estado": "Inicializando Ares Perpetuo V8.0...",
+    "estado": "Inicializando Ares Perpetuo V8.2...",
     "retorno_ultimo_combate": 0.0,
     "ratio_sharpe": 0.0,
     "lr_actual": 0.0002, 
@@ -53,7 +52,7 @@ ESTADISTICAS_IA = {
 VENTANA_TIEMPO = 60
 COMBATES_PPO = 4000
 REPORTAR_CADA = 100 
-PASOS_POR_COMBATE = 180  # Ventana de combate extendida para mayor contexto macro
+PASOS_POR_COMBATE = 180
 
 def alertar_telegram(mensaje):
     if bot_telegram and TELEGRAM_ID:
@@ -63,7 +62,7 @@ def alertar_telegram(mensaje):
             print(f"⚠️ Telegram Log: {e}")
 
 # ==============================================================================
-# 🛰️ SISTEMA CONECTOR REFRESH DE DROPBOX (PUENTE INTACTO)
+# 🛰️ SISTEMA CONECTOR REFRESH DE DROPBOX
 # ==============================================================================
 def obtener_access_token():
     if not DBX_APP_KEY or not DBX_APP_SECRET or not DBX_REFRESH_TOKEN:
@@ -171,7 +170,7 @@ class MercadoGimnasioAresBosque:
         for i in range(6):
             self.matriz_extendida[:, i] = datos_raw[:, i]
             
-        print("⚡ Precalculando Ratios de Adaptabilidad Dinámica V8.0...")
+        print("⚡ Precalculando Ratios de Adaptabilidad Dinámica V8.2...")
         for i in range(30, len(precios_close)):
             retorno_5m = (precios_close[i] - precios_close[i-5]) / (precios_close[i-5] + 1e-8)
             retorno_15m = (precios_close[i] - precios_close[i-15]) / (precios_close[i-15] + 1e-8)
@@ -234,7 +233,8 @@ class MercadoGimnasioAresBosque:
             self.conteo_esperas_seguidas += 1
 
         rendimiento_neto = rendimiento - costo_operacion
-        recompensa = rendimiento_net neto
+        # 🛡️ CORRECCIÓN: Variable de sintaxis corregida perfectamente en una sola palabra
+        recompensa = rendimiento_neto
 
         if accion != 0 and volumen_ahora > volumen_promedio * 1.3: recompensa *= 1.4  
         if accion == 1 and not bosque_alcista: recompensa -= 0.0015 
@@ -260,7 +260,7 @@ class MercadoGimnasioAresBosque:
         return self.obtener_observacion_normalizada(), recompensa, rendimiento_neto, terminado
 
 # ==============================================================================
-# 🏋️ BUCLE PPO PERPETUO (CON COHESIÓN DE CHECKPOINT HISTÓRICO)
+# 🏋️ BUCLE PPO PERPETUO
 # ==============================================================================
 def iniciar_gimnasio_v8():
     global ESTADISTICAS_IA
@@ -270,7 +270,6 @@ def iniciar_gimnasio_v8():
         return
 
     try:
-        # 🧠 CORRECCIÓN: Estructura indentada perfecta y límites de RAM seguros para Render
         df = pd.read_csv(RUTA_CSV, header=None, skiprows=1, nrows=15000, usecols=[1, 2, 3, 4, 5], low_memory=False)
         datos_raw = np.zeros((len(df), 6), dtype=np.float32)
         datos_raw[:, :5] = df[[1, 2, 3, 4, 5]].values
@@ -306,7 +305,7 @@ def iniciar_gimnasio_v8():
             ESTADISTICAS_IA["estado"] = f"⚠️ Fallo inyección molecular: {str(e)}"
             
     entorno = MercadoGimnasioAresBosque(datos_raw, precios_close, volumen_raw, ventana=VENTANA_TIEMPO)
-    alertar_telegram(f"⚡ *Ares Perpetuo V8.0:* Evolución reanudada desde el combate {combate_inicial}.")
+    alertar_telegram(f"⚡ *Ares Perpetuo V8.2:* Evolución reanudada desde el combate {combate_inicial}.")
 
     ops_ganadas = 0
     ops_totales = 0
@@ -419,7 +418,7 @@ def iniciar_gimnasio_v8():
     ESTADISTICAS_IA["estado"] = "🏆 ¡EVOLUCIÓN PERPETUA COMPLETADA CON ÉXITO!"
 
 # ==============================================================================
-# INTERFAZ WEB (PUENTE FLASK SIN CAMBIOS DE ENTORNO)
+# INTERFAZ WEB
 # ==============================================================================
 app = Flask(__name__)
 
@@ -433,7 +432,7 @@ def index():
     return f"""
     <html>
         <head>
-            <title>Gimnasio Ares Perpetuo V8.0</title>
+            <title>Gimnasio Ares Perpetuo V8.2</title>
             <meta http-equiv="refresh" content="3">
             <style>
                 body {{ font-family: 'Segoe UI', sans-serif; background:#04040a; color:#fff; text-align:center; padding:30px; }}
@@ -446,7 +445,7 @@ def index():
         </head>
         <body>
             <div class="container">
-                <h2>⚡ Panel Perpetuo: Ares Caos V8.0 ⚡</h2>
+                <h2>⚡ Panel Perpetuo: Ares Caos V8.2 ⚡</h2>
                 <p style="color:#888; font-size:14px; margin-top:0;">Fusión de Modelos Avanzados con Checkpoint de Resiliencia Perpetua</p>
                 
                 <div style="padding:10px; margin-bottom:10px; text-align:right;">
