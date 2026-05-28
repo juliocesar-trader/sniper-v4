@@ -14,7 +14,9 @@ import requests
 # ==============================================================================
 # 🎯 CONTROL DE VERSIONES Y CONFIGURACIÓN CLOUD PERPETUA (V8.0 PERPETUAL-EVO)
 # ==============================================================================
-CEREBRO_A_ENTRENAR = "modelo_sniper_ia.pkl"
+# 🔥 CORRECCIÓN: Apuntando al archivo histórico y al modelo exacto de tu GitHub
+RUTA_CSV = "BTCUSDT_1m_Ene_Abr_2026.csv"
+CEREBRO_A_ENTRENAR = "modelo_sniper_ia (4) (2).pkl"
 
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
 TELEGRAM_ID = os.environ.get("TELEGRAM_ID")
@@ -51,7 +53,7 @@ ESTADISTICAS_IA = {
 VENTANA_TIEMPO = 60
 COMBATES_PPO = 4000
 REPORTAR_CADA = 100 
-PASOS_POR_COMBATE = 180  # 🧠 MEJORA: Ventana de combate extendida para mayor contexto macro
+PASOS_POR_COMBATE = 180  # Ventana de combate extendida para mayor contexto macro
 
 def alertar_telegram(mensaje):
     if bot_telegram and TELEGRAM_ID:
@@ -135,7 +137,6 @@ class AresActorCritico(nn.Module):
         self.proyeccion_entrada = nn.Linear(num_caracteristicas, d_model)
         self.pos_encoder = PositionalEncoding(d_model)
         
-        # 🔥 FUSIÓN: Capa Transformer blindada con un 40% de Dropout contra el sobreajuste
         encoder_layer = nn.TransformerEncoderLayer(
             d_model=d_model, nhead=nhead, dim_feedforward=128, dropout=dropout, batch_first=True
         )
@@ -185,14 +186,12 @@ class MercadoGimnasioAresBosque:
         self.reset()
 
     def obtener_observacion_normalizada(self):
-        # 🎯 FUSIÓN OPTIMIZADA: Online Scaling sin Fuga de Datos (Data Leakage)
         sub_matriz = self.matriz_extendida[self.paso_actual - self.ventana : self.paso_actual]
         medias = np.mean(sub_matriz, axis=0)
         desviaciones = np.std(sub_matriz, axis=0) + 1e-8
         return (sub_matriz - medias) / desviaciones
 
     def reset(self):
-        # 🎲 Domain Randomization pura para destruir memorización temporal
         self.paso_actual = np.random.randint(self.ventana + 250, len(self.precios) - (PASOS_POR_COMBATE + 10))
         self.conteo_esperas_seguidas = 0
         return self.obtener_observacion_normalizada()
@@ -208,7 +207,6 @@ class MercadoGimnasioAresBosque:
         ma_macro = np.mean(self.precios[self.paso_actual - 200 : self.paso_actual]) if self.paso_actual > 200 else precio_ahora
         bosque_alcista = precio_ahora > ma_macro
 
-        # 💸 FUSIÓN: Comisiones estrictas por operación (0.04% Maker/Taker real)
         COMISION = 0.0004 
 
         if accion == ESTADISTICAS_IA["ultima_direccion"] and accion != 0:
@@ -236,9 +234,8 @@ class MercadoGimnasioAresBosque:
             self.conteo_esperas_seguidas += 1
 
         rendimiento_neto = rendimiento - costo_operacion
-        recompensa = rendimiento_neto
+        recompensa = rendimiento_net neto
 
-        # 🔥 RECOMPENSAS ADAPTATIVAS AVANZADAS V8.0:
         if accion != 0 and volumen_ahora > volumen_promedio * 1.3: recompensa *= 1.4  
         if accion == 1 and not bosque_alcista: recompensa -= 0.0015 
         if accion == 2 and bosque_alcista: recompensa -= 0.0015
@@ -267,25 +264,20 @@ class MercadoGimnasioAresBosque:
 # ==============================================================================
 def iniciar_gimnasio_v8():
     global ESTADISTICAS_IA
-    RUTA_CSV = "BTCUSDT_1m_Ene_Abr_2026.csv"
     
     if not os.path.exists(RUTA_CSV):
         ESTADISTICAS_IA["estado"] = "❌ Error: Falta el archivo histórico CSV."
         return
 
-        try:
-        # 🧠 Optimización de RAM: Cargamos solo 15,000 filas y las columnas exactas
+    try:
+        # 🧠 CORRECCIÓN: Estructura indentada perfecta y límites de RAM seguros para Render
         df = pd.read_csv(RUTA_CSV, header=None, skiprows=1, nrows=15000, usecols=[1, 2, 3, 4, 5], low_memory=False)
-        
-        # Reajustamos el mapeo para el array
         datos_raw = np.zeros((len(df), 6), dtype=np.float32)
         datos_raw[:, :5] = df[[1, 2, 3, 4, 5]].values
-        datos_raw[:, 5] = df[4].values # Duplica el close en la última posición como el original
-        
+        datos_raw[:, 5] = df[4].values 
         precios_close = df[4].values.astype(np.float32)
         volumen_raw = df[5].values.astype(np.float32)
         del df
-
     except Exception as e:
         ESTADISTICAS_IA["estado"] = f"❌ Error CSV: {str(e)}"
         return
@@ -297,7 +289,6 @@ def iniciar_gimnasio_v8():
     
     combate_inicial = 1
 
-    # 🚀 MEJORA: Rescate Completo del Checkpoint Evolutivo Perpetuo
     if os.path.exists(CEREBRO_A_ENTRENAR):
         try:
             checkpoint = torch.load(CEREBRO_A_ENTRENAR, map_location=torch.device('cpu'), weights_only=False)
@@ -309,7 +300,6 @@ def iniciar_gimnasio_v8():
                 ESTADISTICAS_IA = checkpoint.get("estadisticas", ESTADISTICAS_IA)
                 ESTADISTICAS_IA["estado"] = f"🌲 Continuidad Perpetua Cargada. Combate: {combate_inicial}"
             else:
-                # Compatibilidad por si el archivo previo era solo pesos puros
                 modelo_ares.load_state_dict(checkpoint)
                 ESTADISTICAS_IA["estado"] = "⚡ Pesos simples conectados. Iniciando tracking perpetuo."
         except Exception as e:
@@ -355,13 +345,11 @@ def iniciar_gimnasio_v8():
                 if rendimiento > 0: ops_ganadas += 1
             if term: break
             
-        # ⚡ Optimización On-Policy PPO Real
         modelo_ares.train()
         t_estados = torch.tensor(np.array(b_estados), dtype=torch.float32)
         t_acciones = torch.tensor(b_acciones, dtype=torch.long)
         t_prob_viejas = torch.tensor(b_prob_viejas, dtype=torch.float32)
         
-        # 🧠 MEJORA: Recompensa asimétrica basada en Sharpe interno del combate
         rend_medio = np.mean(historial_rendimientos)
         rend_std = np.std(historial_rendimientos) + 1e-8
         sharpe_combate = rend_medio / rend_std
@@ -369,7 +357,6 @@ def iniciar_gimnasio_v8():
         retornos = []
         g_descontado = 0
         for r in reversed(b_recompensas):
-            # Penaliza o premia los retornos según la consistencia de la ronda entera
             r_ajustada = r + (0.001 * sharpe_combate if sharpe_combate > 0 else 0.002 * sharpe_combate)
             g_descontado = r_ajustada + (0.96 * g_descontado) 
             retornos.insert(0, g_descontado)
@@ -408,7 +395,6 @@ def iniciar_gimnasio_v8():
         if ops_totales > 0:
             ESTADISTICAS_IA["efectividad_estimada"] = float(ops_ganadas / ops_totales * 100)
 
-        # ☁️ Sincronización de Estado Completo en Dropbox (Sin fugas de progreso)
         if combate % REPORTAR_CADA == 0:
             checkpoint_perpetuo = {
                 "state_dict": modelo_ares.state_dict(),
@@ -421,7 +407,6 @@ def iniciar_gimnasio_v8():
             subir_cerebro_cloud()
             alertar_telegram(f"🌲 *Ares V8 Cloud:* [{combate}/{COMBATES_PPO}] | Wallet: ${ESTADISTICAS_IA['balance_usd']:.2f} | Sharpe: {ESTADISTICAS_IA['ratio_sharpe']:.4f}")
 
-    # Cierre de ciclo evolutivo masivo
     checkpoint_perpetuo = {
         "state_dict": modelo_ares.state_dict(),
         "optimizer_state": optimizer.state_dict(),
@@ -474,7 +459,7 @@ def index():
 
                 <div class="billetera">
                     <span style="color:#aaa; font-size:13px; font-weight:bold;">💰 CUENTA DE PRUEBA EN RIESGO VARIABLE 💰</span>
-                    <h1 style="margin: 5px 0 0 0; color:#00ff55; font-size:36px;">${ESTADISTICAS_IA["balance_usd"]:.2f} USD</h1>
+                    <h1 style="margin: 5px 0 0 0; color:#00ff55; font-size:36px;">${ESTADISTICAS_IA["balance_usd"]:.2f}</h1>
                     <p style="margin:2px 0 0 0; font-size:15px; font-weight:bold; color:{color_pnl};">PnL Neto Total (Con Fees): {signo_pnl}${ESTADISTICAS_IA["pnl_total_usd"]:.2f} USD</p>
                 </div>
 
