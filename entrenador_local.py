@@ -7,25 +7,27 @@ import torch.nn as nn
 import torch.optim as optim
 from torch.optim.lr_scheduler import CosineAnnealingLR
 import telebot
-from flask import Flask, send_file
+from flask import Flask, send_file, redirect
 import threading
+import requests
 
 # ==============================================================================
-# 🎯 CONTROL DE VERSIONES DEL CEREBRO (SISTEMA DE SEGURIDAD)
+# 🎯 CONTROL DE VERSIONES Y CONFIGURACIÓN CLOUD
 # ==============================================================================
 CEREBRO_A_ENTRENAR = "modelo_sniper_ia (4) (2).pkl"
 
-# ==============================================================================
-# 🛰️ CONFIGURACIÓN DE TELEMETRÍA Y CONTROL GLOBAL
-# ==============================================================================
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
 TELEGRAM_ID = os.environ.get("TELEGRAM_ID")
 bot_telegram = telebot.TeleBot(TELEGRAM_TOKEN) if TELEGRAM_TOKEN else None
 
+DBX_APP_KEY = os.environ.get("DROPBOX_APP_KEY")
+DBX_APP_SECRET = os.environ.get("DROPBOX_APP_SECRET")
+DBX_REFRESH_TOKEN = os.environ.get("DROPBOX_REFRESH_TOKEN")
+
 ESTADISTICAS_IA = {
     "combate_actual": 0,
     "total_combates": 4000,
-    "estado": "Inicializando Bosque Macro V6.2...",
+    "estado": "Inicializando Ares Bosque V6.3 Perpetuo...",
     "retorno_ultimo_combate": 0.0,
     "ratio_sharpe": 0.0,
     "lr_actual": 0.0001,
@@ -35,17 +37,20 @@ ESTADISTICAS_IA = {
     "efectividad_estimada": 0.0,
     "balance_usd": 1000.0,
     "pnl_total_usd": 0.0,
-    "atr_actual": 0.0,
-    "volumen_actual": 0.0,
-    # 📈 NUEVO SISTEMA DE RELEVANCIA HISTÓRICA ACUMULADA
+    "loss_actor": 0.0,
+    "loss_critico": 0.0,
     "peso_atr_acumulado": 33.3,
     "peso_volumen_acumulado": 33.3,
     "peso_macro_acumulado": 33.4,
     "ops_consecutivas_direccion": 0,
     "ultima_direccion": 0,
-    "alerta_ecosistema": "Estable. Analizando tendencias a largo plazo.",
+    "alerta_ecosistema": "Estable. Memoria unificada activa.",
     "errores_indicador": "Ninguno"
 }
+
+VENTANA_TIEMPO = 60
+COMBATES_PPO = 4000
+REPORTAR_CADA = 200
 
 def alertar_telegram(mensaje):
     if bot_telegram and TELEGRAM_ID:
@@ -54,12 +59,67 @@ def alertar_telegram(mensaje):
         except Exception as e:
             print(f"⚠️ Telegram Log: {e}")
 
-VENTANA_TIEMPO = 60
-COMBATES_PPO = 4000
-REPORTAR_CADA = 200
+# ==============================================================================
+# 🛰️ SISTEMA CONECTOR REFRESH DE DROPBOX (MEMORIA INFINITA)
+# ==============================================================================
+def obtener_access_token():
+    """Intercambia el Refresh Token Perpetuo por una llave temporal de acceso"""
+    if not DBX_APP_KEY or not DBX_APP_SECRET or not DBX_REFRESH_TOKEN:
+        return None
+    try:
+        url = "https://api.dropbox.com/oauth2/token"
+        data = {
+            "grant_type": "refresh_token",
+            "refresh_token": DBX_REFRESH_TOKEN,
+            "client_id": DBX_APP_KEY,
+            "client_secret": DBX_APP_SECRET
+        }
+        response = requests.post(url, data=data, timeout=10)
+        return response.json().get("access_token")
+    except Exception as e:
+        print(f"❌ Error renovando token de Dropbox: {e}")
+        return None
+
+def descargar_cerebro_cloud():
+    token = obtener_access_token()
+    if not token: 
+        print("⚠️ Saltando descarga: Faltan credenciales Cloud.")
+        return False
+    try:
+        url = "https://content.dropboxapi.com/2/files/download"
+        headers = {
+            "Authorization": f"Bearer {token}",
+            "Dropbox-API-Arg": '{"path": "/' + CEREBRO_A_ENTRENAR + '"}'
+        }
+        res = requests.post(url, headers=headers, timeout=15)
+        if res.status_code == 200:
+            with open(CEREBRO_A_ENTRENAR, "wb") as f:
+                f.write(res.content)
+            print("🌲 Memoria evolutiva descargada con éxito desde Dropbox.")
+            return True
+    except Exception as e:
+        print(f"⚠️ No hay respaldo previo en la nube: {e}")
+    return False
+
+def subir_cerebro_cloud():
+    token = obtener_access_token()
+    if not token or not os.path.exists(CEREBRO_A_ENTRENAR): 
+        return
+    try:
+        url = "https://content.dropboxapi.com/2/files/upload"
+        headers = {
+            "Authorization": f"Bearer {token}",
+            "Dropbox-API-Arg": '{"path": "/' + CEREBRO_A_ENTRENAR + '", "mode": "overwrite"}',
+            "Content-Type": "application/octet-stream"
+        }
+        with open(CEREBRO_A_ENTRENAR, "rb") as f:
+            requests.post(url, headers=headers, data=f, timeout=20)
+        print("☁️ Respaldo de seguridad sincronizado en Dropbox exitosamente.")
+    except Exception as e:
+        print(f"❌ Error respaldando en la nube: {e}")
 
 # ==============================================================================
-# 🧠 ARQUITECTURA RED NEURONAL TRANSFORMER (ADAPTATIVA V6.2)
+# 🧠 ARQUITECTURA UNIFICADA ARES ACTOR-CRÍTICO (CON GRADIENTES ACTIVOS)
 # ==============================================================================
 class PositionalEncoding(nn.Module):
     def __init__(self, d_model=64, max_len=5000):
@@ -70,33 +130,41 @@ class PositionalEncoding(nn.Module):
         pe[:, 0::2] = torch.sin(position * div_term)
         pe[:, 1::2] = torch.cos(position * div_term)
         self.register_buffer('pe', pe.unsqueeze(0))
-    def forward(self, x): return x + self.pe[:, :x.size(1)]
+    def forward(self, x): 
+        return x + self.pe[:, :x.size(1)]
 
-class TransformerAnalista(nn.Module):
-    def __init__(self, num_caracteristicas=9, d_model=64, nhead=4, num_layers=3, dropout=0.35):
+class AresActorCritico(nn.Module):
+    """El Transformer procesa todo con gradientes activos para evitar desajustes"""
+    def __init__(self, num_caracteristicas=9, d_model=64, nhead=4, num_layers=3, dropout=0.40):
         super().__init__()
         self.proyeccion_entrada = nn.Linear(num_caracteristicas, d_model)
         self.pos_encoder = PositionalEncoding(d_model)
-        encoder_layer = nn.TransformerEncoderLayer(d_model=d_model, nhead=nhead, dim_feedforward=128, dropout=dropout, batch_first=True)
+        
+        # ESCUDO ANTI-SOBREAJUSTE: Aumento de Dropout a 0.40
+        encoder_layer = nn.TransformerEncoderLayer(
+            d_model=d_model, nhead=nhead, dim_feedforward=128, dropout=dropout, batch_first=True
+        )
         self.transformer_encoder = nn.TransformerEncoder(encoder_layer, num_layers=num_layers)
-        self.capa_salida = nn.Sequential(nn.Linear(d_model, 32), nn.ReLU(), nn.Linear(32, 9))
+        
+        # Cabezales unificados
+        self.actor = nn.Sequential(
+            nn.Linear(d_model, 32), nn.ReLU(), nn.Linear(32, 3), nn.Softmax(dim=-1)
+        )
+        self.critico = nn.Sequential(
+            nn.Linear(d_model, 32), nn.ReLU(), nn.Linear(32, 1)
+        )
+
     def forward(self, x):
         x = self.proyeccion_entrada(x) * (64 ** 0.5)
         x = self.pos_encoder(x)
-        return self.capa_salida(self.transformer_encoder(x)[:, -1, :])
-
-class AgentePPO(nn.Module):
-    def __init__(self, dim_entrada=9, num_acciones=3):
-        super().__init__()
-        self.red = nn.Sequential(
-            nn.Linear(dim_entrada, 64), nn.ReLU(),
-            nn.Linear(64, 32), nn.ReLU(),
-            nn.Linear(32, num_acciones), nn.Softmax(dim=-1)
-        )
-    def forward(self, x): return self.red(x)
+        features = self.transformer_encoder(x)[:, -1, :] # Vector de Contexto Puro (Último token)
+        
+        probs = self.actor(features)
+        valor = self.critico(features)
+        return probs, valor
 
 # ==============================================================================
-# 🎯 ENTORNO QUANT PROYECTO ARES BOSQUE (MULTI-TIMEFRAME)
+# 🎯 ENTORNO QUANT CON NORMALIZACIÓN EN VIVO (ANTI DATA LEAKAGE)
 # ==============================================================================
 class MercadoGimnasioAresBosque:
     def __init__(self, datos_raw, precios_close, volumen_raw, ventana=60):
@@ -108,7 +176,7 @@ class MercadoGimnasioAresBosque:
         for i in range(6):
             self.matriz_extendida[:, i] = datos_raw[:, i]
             
-        print("🌲 Generando Ratios de Aceleración Macro (V6.2)...")
+        print("🌲 Generando Ratios de Aceleración Macro V6.3...")
         for i in range(30, len(precios_close)):
             retorno_5m = (precios_close[i] - precios_close[i-5]) / (precios_close[i-5] + 1e-8)
             retorno_15m = (precios_close[i] - precios_close[i-15]) / (precios_close[i-15] + 1e-8)
@@ -120,15 +188,19 @@ class MercadoGimnasioAresBosque:
             self.matriz_extendida[i, 7] = retorno_15m
             self.matriz_extendida[i, 8] = rango_ptj
 
-        self.medias = np.mean(self.matriz_extendida, axis=0)
-        self.desviaciones = np.std(self.matriz_extendida, axis=0) + 1e-8
-        self.datos_norm = (self.matriz_extendida - self.medias) / self.desviaciones
         self.reset()
 
+    def obtener_observacion_normalizada(self):
+        """ONLINE SCALING: Extrae escala solo del pasado inmediato para evitar fugas"""
+        sub_matriz = self.matriz_extendida[self.paso_actual - self.ventana : self.paso_actual]
+        medias = np.mean(sub_matriz, axis=0)
+        desviaciones = np.std(sub_matriz, axis=0) + 1e-8
+        return (sub_matriz - medias) / desviaciones
+
     def reset(self):
-        self.paso_actual = np.random.randint(self.ventana + 50, len(self.precios) - 100)
+        self.paso_actual = np.random.randint(self.ventana + 200, len(self.precios) - 100)
         self.conteo_esperas_seguidas = 0
-        return self.datos_norm[self.paso_actual - self.ventana : self.paso_actual]
+        return self.obtener_observacion_normalizada()
 
     def step(self, accion):
         precio_ahora = self.precios[self.paso_actual]
@@ -173,31 +245,29 @@ class MercadoGimnasioAresBosque:
         if ESTADISTICAS_IA["ops_consecutivas_direccion"] > 5: recompensa -= 0.0003
         if accion == 0 and self.conteo_esperas_seguidas > 5 and volumen_ahora > volumen_promedio: recompensa = -0.0002  
 
-        # 🧠 MEJORA CRÍTICA: Suavizado Exponencial (EMA) para que la relevancia se ACUMULE y no se borre
+        # Suavizado Exponencial de Atención (EMA)
         total_m = atr_estimado + volumen_ahora + abs(precio_ahora - ma_macro) + 1e-6
         peso_instantaneo_atr = (atr_estimado / total_m) * 100
         peso_instantaneo_vol = (volumen_ahora / total_m) * 100
         peso_instantaneo_mac = (abs(precio_ahora - ma_macro) / total_m) * 100
 
-        # Factor alfa de persistencia (0.98 retiene el pasado, 0.02 absorbe el nuevo combate)
         ESTADISTICAS_IA["peso_atr_acumulado"] = (ESTADISTICAS_IA["peso_atr_acumulado"] * 0.98) + (peso_instantaneo_atr * 0.02)
         ESTADISTICAS_IA["peso_volumen_acumulado"] = (ESTADISTICAS_IA["peso_volumen_acumulado"] * 0.98) + (peso_instantaneo_vol * 0.02)
         ESTADISTICAS_IA["peso_macro_acumulado"] = (ESTADISTICAS_IA["peso_macro_acumulado"] * 0.98) + (peso_instantaneo_mac * 0.02)
 
         self.paso_actual += 1
         terminado = (self.paso_actual >= len(self.precios) - 5)
-        return self.datos_norm[self.paso_actual - self.ventana : self.paso_actual], recompensa, rendimiento, terminado
+        return self.obtener_observacion_normalizada(), recompensa, rendimiento, terminado
 
 # ==============================================================================
-# 🏋️ BUCLE DE EVOLUCIÓN QUANT CONTINUA V6.2
+# 🏋️ BUCLE DE EVOLUCIÓN COMPACTA PPO (CON BUFFER DE TRAYECTORIAS REAL)
 # ==============================================================================
 def iniciar_gimnasio_v6():
     global ESTADISTICAS_IA
     RUTA_CSV = "BTCUSDT_1m_Ene_Abr_2026.csv"
-    RUTA_TEORICO = "Transformer_Maestro_Teorico.pt"
     
-    if not os.path.exists(RUTA_CSV) or not os.path.exists(RUTA_TEORICO):
-        ESTADISTICAS_IA["estado"] = "❌ Alerta: Faltan archivos históricos CSV o pesos base PT."
+    if not os.path.exists(RUTA_CSV):
+        ESTADISTICAS_IA["estado"] = "❌ Alerta: Falta el archivo histórico CSV."
         return
 
     try:
@@ -207,102 +277,144 @@ def iniciar_gimnasio_v6():
         volumen_raw = df[5].values.astype(np.float32)
         del df
     except Exception as e:
-        ESTADISTICAS_IA["estado"] = f"❌ Error de procesamiento CSV: {str(e)}"
+        ESTADISTICAS_IA["estado"] = f"❌ Error CSV: {str(e)}"
         return
 
-    escuela = TransformerAnalista()
-    checkpoint = torch.load(RUTA_TEORICO, map_location=torch.device('cpu'), weights_only=False)
-    pretrained_dict = checkpoint['model_state_dict']
-    model_dict = escuela.state_dict()
+    # Descargar la última memoria de la nube si existe antes de inicializar la red
+    descargar_cerebro_cloud()
 
-    for k, v in pretrained_dict.items():
-        if k in model_dict:
-            if v.shape == model_dict[k].shape:
-                model_dict[k] = v
-            elif "proyeccion_entrada.weight" in k:
-                with torch.no_grad():
-                    model_dict[k][:, :6] = v
-
-    escuela.load_state_dict(model_dict)
-    escuela.eval()
+    modelo_ares = AresActorCritico()
     
-    bot_ppo = AgentePPO()
-    
+    # Inyección adaptativa limpia si existe archivo local o descargado
     if os.path.exists(CEREBRO_A_ENTRENAR):
         try:
-            checkpoint_ppo = torch.load(CEREBRO_A_ENTRENAR, map_location=torch.device('cpu'))
-            bot_dict = bot_ppo.state_dict()
-            for k, v in checkpoint_ppo.items():
-                if k in bot_dict:
-                    if v.shape == bot_dict[k].shape:
-                        bot_dict[k] = v
-                    elif "red.0.weight" in k:
-                        with torch.no_grad():
-                            bot_dict[k][:, :6] = v
-            bot_ppo.load_state_dict(bot_dict)
-            ESTADISTICAS_IA["estado"] = f"🌲 Memoria Acumulativa Activa V6.2"
+            checkpoint = torch.load(CEREBRO_A_ENTRENAR, map_location=torch.device('cpu'), weights_only=False)
+            model_dict = modelo_ares.state_dict()
+            for k, v in checkpoint.items():
+                if k in model_dict and v.shape == model_dict[k].shape:
+                    model_dict[k] = v
+                elif "proyeccion_entrada.weight" in k:
+                    with torch.no_grad():
+                        [span_1](start_span)[span_2](start_span)model_dict[k][:, :6] = v # Relleno molecular adaptativo[span_1](end_span)[span_2](end_span)
+            modelo_ares.load_state_dict(model_dict)
+            ESTADISTICAS_IA["estado"] = "🌲 Memoria Unificada de Gradiente Conectada V6.3"
         except Exception as e:
-            ESTADISTICAS_IA["estado"] = f"⚠️ Adaptación V6.2: {str(e)}"
-    else:
-        ESTADISTICAS_IA["estado"] = f"⚠️ No se halló {CEREBRO_A_ENTRENAR}."
+            ESTADISTICAS_IA["estado"] = f"⚠️ Adaptación Incompleta: {str(e)}"
             
-    optimizer_ppo = optim.Adam(bot_ppo.parameters(), lr=0.0001)
-    scheduler = CosineAnnealingLR(optimizer_ppo, T_max=COMBATES_PPO, eta_min=1e-6)
+    optimizer = optim.Adam(modelo_ares.parameters(), lr=0.0001)
+    scheduler = CosineAnnealingLR(optimizer, T_max=COMBATES_PPO, eta_min=1e-6)
     entorno = MercadoGimnasioAresBosque(datos_raw, precios_close, volumen_raw, ventana=VENTANA_TIEMPO)
     
-    alertar_telegram(f"🌲 *Ares Bosque V6.2 Online:* Monitoreo Acumulativo de Relevancia Activado.")
+    alertar_telegram("🌲 *Ares Bosque V6.3 Online:* Modo Anti-Sobreajuste y Sincronización Cloud Activa.")
 
     ops_ganadas_acumuladas = 0
     ops_totales_acumuladas = 0
 
     for combate in range(1, COMBATES_PPO + 1):
         ESTADISTICAS_IA["combate_actual"] = combate
-        if "Memoria" not in ESTADISTICAS_IA["estado"] and combate > 5:
-            ESTADISTICAS_IA["estado"] = "🚀 Corriendo Sniper V6.2 (Auditoría Estable)..."
-        
         obs = entorno.reset()
+        
+        # BUFFERS DE TRAYECTORIA DE PPO REAL
+        b_estados, b_acciones, b_prob_viejas, b_recompensas, b_valores = [], [], [], [], []
         historial_rendimientos = []
         
+        modelo_ares.eval() # Modo inferencia rápida durante el combate
         for _ in range(30):
-            obs_t = torch.tensor(obs).unsqueeze(0)
+            obs_t = torch.tensor(obs, dtype=torch.float32).unsqueeze(0)
             with torch.no_grad():
-                analisis = escuela(obs_t)
-            probs = bot_ppo(analisis)
+                probs, valor = modelo_ares(obs_t)
+            
             accion = torch.argmax(probs, dim=-1).item()
+            prob_accion = probs[0, accion].item()
             
             sig_obs, recompensa, rendimiento, term = entorno.step(accion)
+            
+            # Almacenar experiencias
+            b_estados.append(obs)
+            b_acciones.append(accion)
+            b_prob_viejas.append(prob_accion)
+            b_recompensas.append(recompensa)
+            b_valores.append(valor.item())
             historial_rendimientos.append(rendimiento)
+            
             obs = sig_obs
             
             if accion != 0:
                 ops_totales_acumuladas += 1
-                impacto_monetario = ESTADISTICAS_IA["balance_usd"] * rendimiento
-                ESTADISTICAS_IA["balance_usd"] += impacto_monetario
+                ESTADISTICAS_IA["balance_usd"] += ESTADISTICAS_IA["balance_usd"] * rendimiento
                 ESTADISTICAS_IA["pnl_total_usd"] = ESTADISTICAS_IA["balance_usd"] - 1000.0
                 if rendimiento > 0: ops_ganadas_acumuladas += 1
-
-            loss = -torch.log(probs[0, accion] + 1e-8) * recompensa
-            optimizer_ppo.zero_grad()
-            if recompensa != 0.0:
-                loss.backward()
-                optimizer_ppo.step()
             if term: break
+            
+        # ==============================================================================
+        # 🔥 FASE DE OPTIMIZACIÓN CLIPPED PPO REAL (AL TERMINAR EL COMBATE)
+        # ==============================================================================
+        [span_3](start_span)modelo_ares.train() # Encendemos gradientes y dropout[span_3](end_span)
+        
+        t_estados = torch.tensor(np.array(b_estados), dtype=torch.float32)
+        t_acciones = torch.tensor(b_acciones, dtype=torch.long)
+        t_prob_viejas = torch.tensor(b_prob_viejas, dtype=torch.float32)
+        
+        # Calcular retornos descontados históricos
+        retornos = []
+        g_descontado = 0
+        for r in reversed(b_recompensas):
+            g_descontado = r + (0.97 * g_descontado) # Factor de descuento
+            retornos.insert(0, g_descontado)
+        t_retornos = torch.tensor(retornos, dtype=torch.float32)
+        t_valores = torch.tensor(b_valores, dtype=torch.float32)
+        
+        # Ventaja Clásica PPO
+        ventajas = t_retornos - t_valores.detach()
+        
+        # 4 Épocas de repaso intensivo por combate (Buffer Optimization)
+        for _ in range(4):
+            nuevas_probs, nuevos_valores = modelo_ares(t_estados)
+            nuevos_valores = nuevos_valores.squeeze()
+            
+            prob_especificas = nuevas_probs.gather(1, t_acciones.unsqueeze(1)).squeeze()
+            ratios = prob_especificas / (t_prob_viejas + 1e-8)
+            
+            # Pérdida Clipada de PPO
+            surr1 = ratios * ventajas
+            surr2 = torch.clamp(ratios, 1.0 - 0.2, 1.0 + 0.2) * ventajas
+            loss_actor = -torch.min(surr1, surr2).mean()
+            
+            # Pérdida de función de valor (Crítico)
+            loss_critico = nn.MSELoss()(nuevos_valores, t_retornos)
+            
+            # Factor de entropía dinámico para forzar la curiosidad de la IA
+            entropia = -(nuevas_probs * torch.log(nuevas_probs + 1e-8)).mean()
+            
+            loss_total = loss_actor + 0.5 * loss_critico - 0.01 * entropia
+            
+            optimizer.zero_grad()
+            loss_total.backward()
+            # ESCUDO CRÍTICO: Gradient Clipping para proteger el Transformer
+            nn.utils.clip_grad_norm_(modelo_ares.parameters(), max_norm=0.5)
+            optimizer.step()
             
         scheduler.step()
         
+        # Actualización de Métricas de Control
+        ESTADISTICAS_IA["loss_actor"] = float(loss_actor.item())
+        ESTADISTICAS_IA["loss_critico"] = float(loss_critico.item())
         ESTADISTICAS_IA["retorno_ultimo_combate"] = float(np.sum(historial_rendimientos))
         if len(historial_rendimientos) > 1 and np.std(historial_rendimientos) > 0:
             ESTADISTICAS_IA["ratio_sharpe"] = float(np.mean(historial_rendimientos) / np.std(historial_rendimientos))
-        ESTADISTICAS_IA["lr_actual"] = float(optimizer_ppo.param_groups[0]['lr'])
+        ESTADISTICAS_IA["lr_actual"] = float(optimizer.param_groups[0]['lr'])
         if ops_totales_acumuladas > 0:
             ESTADISTICAS_IA["efectividad_estimada"] = float(ops_ganadas_acumuladas / ops_totales_acumuladas * 100)
 
+        # Reporte y Sincronización Automática con la Nube
         if combate % REPORTAR_CADA == 0:
-            torch.save(bot_ppo.state_dict(), CEREBRO_A_ENTRENAR)
-            alertar_telegram(f"🌲 *V6.2:* [{combate}/{COMBATES_PPO}] | Wallet: ${ESTADISTICAS_IA['balance_usd']:.2f} | Sharpe: {ESTADISTICAS_IA['ratio_sharpe']:.4f}")
+            torch.save(modelo_ares.state_dict(), CEREBRO_A_ENTRENAR)
+            subir_cerebro_cloud() # Sube el cerebro a Dropbox de forma automática
+            alertar_telegram(f"🌲 *V6.3 Cloud:* [{combate}/{COMBATES_PPO}] | Wallet: ${ESTADISTICAS_IA['balance_usd']:.2f} | Sharpe: {ESTADISTICAS_IA['ratio_sharpe']:.4f}")
 
-    torch.save(bot_ppo.state_dict(), CEREBRO_A_ENTRENAR)
-    ESTADISTICAS_IA["estado"] = "🏆 ¡EVOLUCIÓN MÁXIMA V6.2 COMPLETA!"
+    torch.save(modelo_ares.state_dict(), CEREBRO_A_ENTRENAR)
+    subir_cerebro_cloud()
+    ESTADISTICAS_IA["estado"] = "🏆 ¡EVOLUCIÓN MÁXIMA V6.3 PERPETUA COMPLETA!"
 
 # ==============================================================================
 # 📺 INTERFAZ INTERACTIVA PREMIUM (FLASK HTML)
@@ -319,27 +431,24 @@ def index():
     return f"""
     <html>
         <head>
-            <title>Gimnasio Sniper V6.2 - Ares Bosque</title>
+            <title>Gimnasio Ares Bosque V6.3</title>
             <meta http-equiv="refresh" content="3">
             <style>
                 body {{ font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background:#07070f; color:#fff; text-align:center; padding:30px; }}
-                .container {{ max-width: 750px; margin: 0 auto; background: #0f0f1f; padding: 25px; border-radius: 12px; border: 1px solid #1c1c3a; box-shadow: 0 8px 24px rgba(0,0,0,0.7); }}
+                .container {{ max-width: 750px; margin: 0 auto; background: #0f0f1f; padding: 25px; border-radius: 12px; border: 1px solid #1c1c3a; }}
                 .grid {{ display: grid; grid-template-columns: 1fr 1fr; gap: 15px; text-align: left; margin-top: 20px; }}
                 .card {{ background: #14142b; padding: 15px; border-radius: 6px; border: 1px solid #222244; }}
-                .btn {{ display: inline-block; background: #ff5500; color: white; font-weight: bold; padding: 12px 24px; text-decoration: none; border-radius: 6px; border: 1px solid #fff; margin-top: 15px; transition: 0.3s; }}
-                .btn:hover {{ background: #ff7733; }}
-                .btn-nav {{ background: #4a157d; border-color: #00ffcc; }}
-                h2 {{ color: #00ffcc; margin-bottom: 5px; }}
+                .btn {{ display: inline-block; background: #ff5500; color: white; font-weight: bold; padding: 12px 24px; text-decoration: none; border-radius: 6px; margin-top: 15px; }}
                 .billetera {{ background: #0b1a12; border: 2px solid #00ff55; padding: 15px; border-radius: 8px; margin-top: 15px; text-align: center; }}
             </style>
         </head>
         <body>
             <div class="container">
-                <h2>🌲 Panel Operativo: V6.2 - Ares Bosque 🌲</h2>
-                <p style="color:#aaa; font-size:14px; margin-top:0;">Ecosistema de Auditoría de Pesos Históricos Estables</p>
+                <h2>🌲 Panel Operativo: V6.3 - Ares Bosque Cloud 🌲</h2>
+                <p style="color:#aaa; font-size:14px; margin-top:0;">Algoritmo Unificado PPO con Escudo Anti-Sobreajuste</p>
                 
                 <div style="padding:10px; margin-bottom:10px; text-align:right;">
-                    <a href="/telemetria" class="btn btn-nav" style="margin:0; padding:8px 16px; font-size:13px;">📊 IR A TELEMETRÍA DE INDICADORES</a>
+                    <a href="/telemetria" class="btn" style="margin:0; background:#4a157d; border: 1px solid #00ffcc; padding:8px 16px;">📊 VER TELEMETRÍA DE ATENCIÓN</a>
                 </div>
 
                 <div style="padding:15px; background:#181830; border-radius:8px; font-size:16px; font-weight:bold; color:#ffcc00; border-left: 5px solid #ffcc00;">
@@ -347,33 +456,22 @@ def index():
                 </div>
 
                 <div class="billetera">
-                    <span style="color:#aaa; font-size:13px; font-weight:bold; letter-spacing:1px;">💰 BILLETERA SIMULADA DE JORNADA MACRO 💰</span>
-                    <h1 style="margin: 5px 0 0 0; color:#00ff55; font-size:36px;">${ESTADISTICAS_IA["balance_usd"]:.2f} <span style="font-size:18px; color:#aaa;">USD</span></h1>
-                    <p style="margin:2px 0 0 0; font-size:15px; font-weight:bold; color:{color_pnl};">Rendimiento: {signo_pnl}${ESTADISTICAS_IA["pnl_total_usd"]:.2f} USD</p>
+                    <span style="color:#aaa; font-size:13px; font-weight:bold;">💰 WALLET ACTUAL DE PRUEBA 💰</span>
+                    <h1 style="margin: 5px 0 0 0; color:#00ff55; font-size:36px;">${ESTADISTICAS_IA["balance_usd"]:.2f} USD</h1>
+                    <p style="margin:2px 0 0 0; font-size:15px; font-weight:bold; color:{color_pnl};">PnL Total: {signo_pnl}${ESTADISTICAS_IA["pnl_total_usd"]:.2f} USD</p>
                 </div>
 
                 <div class="grid">
                     <div class="card">
-                        <p>🎯 <b>Combate Actual:</b> {ESTADISTICAS_IA["combate_actual"]} / {ESTADISTICAS_IA["total_combates"]}</p>
-                        <p>📉 <b>Learning Rate (PPO):</b> <span style="color:#00ffcc;">{ESTADISTICAS_IA["lr_actual"]:.7f}</span></p>
-                        <p>📈 <b>Retorno Bloque:</b> {ESTADISTICAS_IA["retorno_ultimo_combate"]:.5f}</p>
+                        <p>🎯 <b>Combate:</b> {ESTADISTICAS_IA["combate_actual"]} / {ESTADISTICAS_IA["total_combates"]}</p>
+                        <p>📉 <b>LR Actual:</b> <span style="color:#00ffcc;">{ESTADISTICAS_IA["lr_actual"]:.7f}</span></p>
+                        <p>📉 <b>Pérdida Actor:</b> {ESTADISTICAS_IA["loss_actor"]:.5f}</p>
+                        <p>📈 <b>Pérdida Crítico:</b> {ESTADISTICAS_IA["loss_critico"]:.5f}</p>
                     </div>
                     <div class="card">
-                        <p>📊 <b>Ratio Sharpe Histórico:</b> <span style="color:{color_sharpe}; font-size:18px; font-weight:bold;">{ESTADISTICAS_IA["ratio_sharpe"]:.4f}</span></p>
-                        <p>🔥 <b>Efectividad de Conducción:</b> <span style="color:{color_efectividad}; font-size:18px; font-weight:bold;">{ESTADISTICAS_IA["efectividad_estimada"]:.2f}%</span></p>
+                        <p>📊 <b>Ratio Sharpe:</b> <span style="color:{color_sharpe}; font-size:18px; font-weight:bold;">{ESTADISTICAS_IA["ratio_sharpe"]:.4f}</span></p>
+                        <p>🔥 <b>Efectividad Real:</b> <span style="color:{color_efectividad}; font-size:18px; font-weight:bold;">{ESTADISTICAS_IA["efectividad_estimada"]:.2f}%</span></p>
                     </div>
-                </div>
-
-                <h3 style="text-align:left; color:#ffcc00; margin-top:20px; margin-bottom:5px;">🧩 Registro de Acciones Flexibles:</h3>
-                <div class="grid" style="grid-template-columns: 1fr 1fr 1fr; font-size:14px; margin-top:5px;">
-                    <div class="card" style="text-align:center; border-color:#00ff55;">🟢 <b>LONGs:</b> {ESTADISTICAS_IA["ops_long"]}</div>
-                    <div class="card" style="text-align:center; border-color:#ff3333;">🔴 <b>SHORTs:</b> {ESTADISTICAS_IA["ops_short"]}</div>
-                    <div class="card" style="text-align:center; border-color:#888;">💤 <b>ESPERAs:</b> {ESTADISTICAS_IA["ops_espera"]}</div>
-                </div>
-
-                <br><br>
-                <div style="background:#1a0c24; padding:15px; border-radius:8px; border:1px solid #4a157d;">
-                    <a href="/descargar_cerebro" class="btn" style="margin:0;">📥 DESCARGAR CEREBRO V6.2 (.PKL)</a>
                 </div>
             </div>
         </body>
@@ -382,77 +480,41 @@ def index():
 
 @app.route('/telemetria')
 def telemetria():
-    color_alerta = "#00ffcc" if "Estable" in ESTADISTICAS_IA["alerta_ecosistema"] else "#ffcc00"
-    color_err = "#00ff55" if "Ninguno" in ESTADISTICAS_IA["errores_indicador"] else "#ff3333"
-    
     return f"""
     <html>
         <head>
-            <title>Telemetría de Indicadores - Sniper V6.2</title>
+            <title>Telemetría - Ares Bosque</title>
             <meta http-equiv="refresh" content="3">
             <style>
-                body {{ font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background:#07070f; color:#fff; padding:30px; text-align:center; }}
-                .container {{ max-width: 750px; margin: 0 auto; background: #0f0f1f; padding: 25px; border-radius: 12px; border: 1px solid #1c1c3a; box-shadow: 0 8px 24px rgba(0,0,0,0.7); }}
-                .barra-contenedor {{ background: #222; border-radius: 8px; margin: 10px 0; text-align: left; overflow: hidden; }}
-                .barra {{ height: 25px; line-height: 25px; color: black; font-weight: bold; padding-left: 10px; font-size: 13px; transition: 0.5s; }}
-                .card-alert {{ background: #1a1414; border: 1px solid #ff3333; padding: 15px; border-radius: 6px; text-align: left; margin-top: 20px; }}
-                .btn {{ display: inline-block; background: #4a157d; color: white; font-weight: bold; padding: 8px 16px; text-decoration: none; border-radius: 6px; border: 1px solid #00ffcc; }}
+                body {{ font-family: 'Segoe UI', sans-serif; background:#07070f; color:#fff; padding:30px; text-align:center; }}
+                .container {{ max-width: 750px; margin: 0 auto; background: #0f0f1f; padding: 25px; border-radius: 12px; }}
+                .barra-contenedor {{ background: #222; border-radius: 8px; margin: 10px 0; overflow: hidden; }}
+                .barra {{ height: 25px; line-height: 25px; color: black; font-weight: bold; padding-left: 10px; transition: 0.5s; }}
             </style>
         </head>
         <body>
             <div class="container">
-                <div style="text-align:left; margin-bottom:15px;">
-                    <a href="/" class="btn">⬅️ REGRESAR AL PANEL PRINCIPAL</a>
-                </div>
-                
-                <h2 style="color:#00ffcc;">📊 Auditoría de Relevancia de Características Acumuladas</h2>
-                <p style="color:#aaa; font-size:14px;">Mide el peso histórico real que la IA le asigna a cada estrategia a lo largo de los combates.</p>
-                
+                <h2 style="color:#00ffcc;">📊 Distribución de Atención de la Red (Filtro Movilizado)</h2>
                 <br>
-                <h3>🧬 Distribución de Atención de la Red Neuronal (Histórica):</h3>
+                <p style="text-align:left;">⚡ <b>Ecosistema Volatilidad (ATR): {ESTADISTICAS_IA["peso_atr_acumulado"]:.1f}%</b></p>
+                <div class="barra-contenedor"><div class="barra" style="width: {ESTADISTICAS_IA["peso_atr_acumulado"]}%; background: #ffff00;"></div></div>
                 
-                <p style="text-align:left; margin-bottom:2px;">⚡ <b>Ecosistema de Volatilidad (ATR Promedio): {ESTADISTICAS_IA["peso_atr_acumulado"]:.1f}%</b></p>
-                <div class="barra-contenedor">
-                    <div class="barra" style="width: {ESTADISTICAS_IA["peso_atr_acumulado"]}%; background: #ffff00;"></div>
-                </div>
-
-                <p style="text-align:left; margin-bottom:2px;">📊 <b>Ecosistema de Volumen (Filtro Simons + Institutional): {ESTADISTICAS_IA["peso_volumen_acumulado"]:.1f}%</b></p>
-                <div class="barra-contenedor">
-                    <div class="barra" style="width: {ESTADISTICAS_IA["peso_volumen_acumulado"]}%; background: #00ff55;"></div>
-                </div>
-
-                <p style="text-align:left; margin-bottom:2px;">🌲 <b>Ecosistema Macro & Canales (Tudor Jones 5m/15m): {ESTADISTICAS_IA["peso_macro_acumulado"]:.1f}%</b></p>
-                <div class="barra-contenedor">
-                    <div class="barra" style="width: {ESTADISTICAS_IA["peso_macro_acumulado"]}%; background: #00ffcc;"></div>
-                </div>
-
-                <br><hr style="border-color:#1c1c3a;"><br>
-
-                <h3 style="text-align:left; color:#ffcc00; margin:0;">🚨 Monitor de Sinergias y Filtros Conductuales:</h3>
-                <div class="card-alert" style="border-color: {color_alerta}; background:#14171a;">
-                    <p>🔥 <b>Estado de Sinergias Históricas:</b> <span style="color:{color_alerta}; font-weight:bold;">{ESTADISTICAS_IA["alerta_ecosistema"]}</span></p>
-                    <p>🔄 <b>Rachas Consecutivas en la Misma Dirección:</b> <span style="color:#ffff00; font-weight:bold;">{ESTADISTICAS_IA["ops_consecutivas_direccion"]} operaciones</span></p>
-                </div>
-
-                <div class="card-alert" style="border-color: {color_err}; background:#0f1411; margin-top:15px;">
-                    <p>🛑 <b>Auditoría de Indicadores Perjudiciales:</b> <span style="color:{color_err}; font-weight:bold;">{ESTADISTICAS_IA["errores_indicador"]}</span></p>
-                </div>
+                <p style="text-align:left;">📊 <b>Ecosistema Volumen (Simons): {ESTADISTICAS_IA["peso_volumen_acumulado"]:.1f}%</b></p>
+                <div class="barra-contenedor"><div class="barra" style="width: {ESTADISTICAS_IA["peso_volumen_acumulado"]}%; background: #00ff55;"></div></div>
+                
+                <p style="text-align:left;">🌲 <b>Ecosistema Macro (Tudor Jones): {ESTADISTICAS_IA["peso_macro_acumulado"]:.1f}%</b></p>
+                <div class="barra-contenedor"><div class="barra" style="width: {ESTADISTICAS_IA["peso_macro_acumulado"]}%; background: #00ffcc;"></div></div>
+                <br>
+                <a href="/" style="color:#00ffcc; text-decoration:none;">⬅️ Regresar al Panel Principal</a>
             </div>
         </body>
     </html>
     """
 
-@app.route('/descargar_cerebro')
-def descargar_cerebro():
-    if os.path.exists(CEREBRO_A_ENTRENAR):
-        return send_file(CEREBRO_A_ENTRENAR, as_attachment=True)
-    else:
-        return f"❌ Alerta: El archivo {CEREBRO_A_ENTRENAR} no se encuentra consolidado en disco."
-
 if __name__ == "__main__":
     puerto = int(os.environ.get("PORT", 10000))
     def arrancar():
-        time.sleep(3)
+        time.sleep(2)
         iniciar_gimnasio_v6()
     t = threading.Thread(target=arrancar)
     t.daemon = True
