@@ -273,12 +273,19 @@ def iniciar_gimnasio_v8():
         ESTADISTICAS_IA["estado"] = "❌ Error: Falta el archivo histórico CSV."
         return
 
-    try:
-        df = pd.read_csv(RUTA_CSV, header=None, skiprows=1, nrows=45000, low_memory=False)
-        datos_raw = df[[1, 2, 3, 4, 5, 4]].values.astype(np.float32)
+        try:
+        # 🧠 Optimización de RAM: Cargamos solo 15,000 filas y las columnas exactas
+        df = pd.read_csv(RUTA_CSV, header=None, skiprows=1, nrows=15000, usecols=[1, 2, 3, 4, 5], low_memory=False)
+        
+        # Reajustamos el mapeo para el array
+        datos_raw = np.zeros((len(df), 6), dtype=np.float32)
+        datos_raw[:, :5] = df[[1, 2, 3, 4, 5]].values
+        datos_raw[:, 5] = df[4].values # Duplica el close en la última posición como el original
+        
         precios_close = df[4].values.astype(np.float32)
         volumen_raw = df[5].values.astype(np.float32)
         del df
+
     except Exception as e:
         ESTADISTICAS_IA["estado"] = f"❌ Error CSV: {str(e)}"
         return
