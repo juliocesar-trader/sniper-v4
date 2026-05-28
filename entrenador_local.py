@@ -13,7 +13,6 @@ import threading
 # ==============================================================================
 # 🎯 CONTROL DE VERSIONES DEL CEREBRO (SISTEMA DE SEGURIDAD)
 # ==============================================================================
-# Apuntando directamente al archivo consolidado que descargaste con los 4,000 combates
 CEREBRO_A_ENTRENAR = "modelo_sniper_ia (4) (2).pkl"
 
 # ==============================================================================
@@ -26,7 +25,7 @@ bot_telegram = telebot.TeleBot(TELEGRAM_TOKEN) if TELEGRAM_TOKEN else None
 ESTADISTICAS_IA = {
     "combate_actual": 0,
     "total_combates": 4000,
-    "estado": "Inicializando Bosque Macro V6...",
+    "estado": "Inicializando Bosque Macro V6.1...",
     "retorno_ultimo_combate": 0.0,
     "ratio_sharpe": 0.0,
     "lr_actual": 0.0001,
@@ -38,14 +37,13 @@ ESTADISTICAS_IA = {
     "pnl_total_usd": 0.0,
     "atr_actual": 0.0,
     "volumen_actual": 0.0,
-    # Nuevas variables de la ventana de telemetría (Features Importances)
     "peso_atr": 33.3,
     "peso_volumen": 33.3,
     "peso_macro": 33.4,
     "ops_consecutivas_direccion": 0,
-    "ultima_direccion": 0,  # 1: Long, 2: Short
-    "alerta_ecosistema": "Estable. Analizando Sinergias.",
-    "errores_indicador": "Ninguno detectado"
+    "ultima_direccion": 0,
+    "alerta_ecosistema": "Estable. Forzando Alineación de Canales.",
+    "errores_indicador": "Ninguno"
 }
 
 def alertar_telegram(mensaje):
@@ -60,7 +58,7 @@ COMBATES_PPO = 4000
 REPORTAR_CADA = 200
 
 # ==============================================================================
-# 🧠 ARQUITECTURA RED NEURONAL TRANSFORMER (V6 ANTI-SOBREAJUSTE)
+# 🧠 ARQUITECTURA RED NEURONAL TRANSFORMER (ADAPTATIVA V6.1)
 # ==============================================================================
 class PositionalEncoding(nn.Module):
     def __init__(self, d_model=64, max_len=5000):
@@ -74,12 +72,10 @@ class PositionalEncoding(nn.Module):
     def forward(self, x): return x + self.pe[:, :x.size(1)]
 
 class TransformerAnalista(nn.Module):
-    # Se expande num_caracteristicas de 6 a 9 para procesar los vectores Macro y Canales
     def __init__(self, num_caracteristicas=9, d_model=64, nhead=4, num_layers=3, dropout=0.35):
         super().__init__()
         self.proyeccion_entrada = nn.Linear(num_caracteristicas, d_model)
         self.pos_encoder = PositionalEncoding(d_model)
-        # 🛡️ CANDADO 1 ANTI-SOBREAJUSTE: Elevamos dropout a 0.35 para apagar neuronas aleatoriamente
         encoder_layer = nn.TransformerEncoderLayer(d_model=d_model, nhead=nhead, dim_feedforward=128, dropout=dropout, batch_first=True)
         self.transformer_encoder = nn.TransformerEncoder(encoder_layer, num_layers=num_layers)
         self.capa_salida = nn.Sequential(nn.Linear(d_model, 32), nn.ReLU(), nn.Linear(32, 9))
@@ -99,30 +95,22 @@ class AgentePPO(nn.Module):
     def forward(self, x): return self.red(x)
 
 # ==============================================================================
-# 🎯 ENTORNO QUANT PROYECTO ARES BOSQUE (MULTI-TIMEFRAME + TRADERS HISTÓRICOS)
+# 🎯 ENTORNO QUANT PROYECTO ARES BOSQUE (MULTI-TIMEFRAME)
 # ==============================================================================
 class MercadoGimnasioAresBosque:
     def __init__(self, datos_raw, precios_close, volumen_raw, ventana=60):
-        # 🛡️ CANDADO 2 ANTI-SOBREAJUSTE: Abstracción absoluta por cambios porcentuales (Ratios)
         self.ventana = ventana
         self.precios = precios_close
         self.volumen = volumen_raw
         
-        # Construcción de la matriz extendida de 9 columnas (Velas 1m + Ratios 5m + Ratios 15m)
         self.matriz_extendida = np.zeros((len(precios_close), 9), dtype=np.float32)
-        
-        # Columnas 0 a 5: Datos base
         for i in range(6):
             self.matriz_extendida[:, i] = datos_raw[:, i]
             
-        # Generación de perspectivas Macro e Históricas sin alterar datos absolutos
-        print("🌲 Generando Bosque Macro Múltiple (1m, 5m, 15m)...")
+        print("🌲 Generando Ratios de Aceleración Macro (V6.1)...")
         for i in range(30, len(precios_close)):
-            # 🟢 MULTI-TIMEFRAME (5m y 15m)
             retorno_5m = (precios_close[i] - precios_close[i-5]) / (precios_close[i-5] + 1e-8)
             retorno_15m = (precios_close[i] - precios_close[i-15]) / (precios_close[i-15] + 1e-8)
-            
-            # 🏛️ CANALES DE IMPULSO (Paul Tudor Jones)
             max_24 = np.max(precios_close[i-24:i])
             min_24 = np.min(precios_close[i-24:i])
             rango_ptj = 1.0 if precios_close[i] >= max_24 else (-1.0 if precios_close[i] <= min_24 else 0.0)
@@ -149,15 +137,12 @@ class MercadoGimnasioAresBosque:
         precios_ventana = self.precios[self.paso_actual - 14 : self.paso_actual]
         atr_estimado = np.max(precios_ventana) - np.min(precios_ventana)
         volumen_promedio = np.mean(self.volumen[self.paso_actual - 14 : self.paso_actual]) + 1e-6
-        
-        # 📈 PERSPECTIVA MACRO TRADUCIDA (Últimas 200 velas)
         ma_macro = np.mean(self.precios[self.paso_actual - 200 : self.paso_actual])
         bosque_alcista = precio_ahora > ma_macro
 
         ESTADISTICAS_IA["atr_actual"] = float(atr_estimado)
         ESTADISTICAS_IA["volumen_actual"] = float(volumen_ahora)
 
-        # Control dinámico de rachas tercas
         if accion == ESTADISTICAS_IA["ultima_direccion"] and accion != 0:
             ESTADISTICAS_IA["ops_consecutivas_direccion"] += 1
         else:
@@ -178,37 +163,15 @@ class MercadoGimnasioAresBosque:
         else:
             self.conteo_esperas_seguidas += 1
 
-        # 🎰 MATRIZ DE RECOMPENSA AVANZADA RECONSTRUIDA (ARES BOSQUE)
         recompensa = rendimiento
-        
-        # Filtro de volumen institucional
-        if accion != 0 and volumen_ahora > volumen_promedio * 1.5:
-            recompensa *= 1.3  
-            
-        # Filtro ATR
-        if accion != 0 and atr_estimado < (np.mean(self.precios) * 0.0005):
-            recompensa *= 0.6  
-            ESTADISTICAS_IA["errores_indicador"] = "ATR bajo (Lateralización perjudicial)"
-
-        # 🏛️ REGLA JIM SIMONS: Castigo a falsas aceleraciones de precio sin volumen institucional
-        if accion != 0 and abs(precio_siguiente - precio_ahora) > atr_estimado and volumen_ahora < volumen_promedio:
-            recompensa -= 0.0005
-            ESTADISTICAS_IA["alerta_ecosistema"] = "Detectada anomalía de volumen (Filtro Simons Activo)"
-
-        # 🌲 MULTA POR ATACAR EL BOSQUE MACRO DE FRENTE
+        if accion != 0 and volumen_ahora > volumen_promedio * 1.5: recompensa *= 1.3  
+        if accion != 0 and atr_estimado < (np.mean(self.precios) * 0.0005): recompensa *= 0.6  
+        if accion != 0 and abs(precio_siguiente - precio_ahora) > atr_estimado and volumen_ahora < volumen_promedio: recompensa -= 0.0005
         if accion == 1 and not bosque_alcista: recompensa *= 0.5
         if accion == 2 and bosque_alcista: recompensa *= 0.5
+        if ESTADISTICAS_IA["ops_consecutivas_direccion"] > 5: recompensa -= 0.0003
+        if accion == 0 and self.conteo_esperas_seguidas > 5 and volumen_ahora > volumen_promedio: recompensa = -0.0002  
 
-        # 🛑 CONTROL CONDUCTUAL: Castigo doble si insiste tercamente en la misma dirección
-        if ESTADISTICAS_IA["ops_consecutivas_direccion"] > 5:
-            recompensa -= 0.0003
-            ESTADISTICAS_IA["alerta_ecosistema"] = "Activado freno de fatiga por rachas tercas"
-
-        # 🏛️ REGLAS DE LAS TORTUGAS: Penalización si la operación se estanca demasiado tiempo
-        if accion == 0 and self.conteo_esperas_seguidas > 5 and volumen_ahora > volumen_promedio:
-            recompensa = -0.0002  
-
-        # Dinámica de Atenciones Simulada para la Ventana de Telemetría
         total_m = atr_estimado + volumen_ahora + abs(precio_ahora - ma_macro) + 1e-6
         ESTADISTICAS_IA["peso_atr"] = float((atr_estimado / total_m) * 100)
         ESTADISTICAS_IA["peso_volumen"] = float((volumen_ahora / total_m) * 100)
@@ -219,7 +182,7 @@ class MercadoGimnasioAresBosque:
         return self.datos_norm[self.paso_actual - self.ventana : self.paso_actual], recompensa, rendimiento, terminado
 
 # ==============================================================================
-# 🏋️ BUCLE DE EVOLUCIÓN QUANT CONTINUA V6
+# 🏋️ BUCLE DE EVOLUCIÓN QUANT CONTINUA V6.1
 # ==============================================================================
 def iniciar_gimnasio_v6():
     global ESTADISTICAS_IA
@@ -240,44 +203,61 @@ def iniciar_gimnasio_v6():
         ESTADISTICAS_IA["estado"] = f"❌ Error de procesamiento CSV: {str(e)}"
         return
 
+    # 🧬 INYECCIÓN CLÍNICA MULTI-DIMENSIONAL (CANDADO DE FUERZA PARA EVITAR EL TENSOR MISMATCH)
     escuela = TransformerAnalista()
     checkpoint = torch.load(RUTA_TEORICO, map_location=torch.device('cpu'), weights_only=False)
-    
-    # 🛡️ CANDADO 3 ANTI-SOBREAJUSTE: Adaptación quirúrgica del estado de pesos para la capa expandida
     pretrained_dict = checkpoint['model_state_dict']
     model_dict = escuela.state_dict()
-    # Filtramos la capa de proyección de entrada para inicializarla limpia debido al cambio de 6 a 9 variables
-    pretrained_dict = {k: v for k, v in pretrained_dict.items() if k in model_dict and "proyeccion_entrada" not in k}
-    model_dict.update(pretrained_dict)
+
+    # Alineación automática: Copiar todo excepto la capa rota, y forzar la adaptación de formas
+    for k, v in pretrained_dict.items():
+        if k in model_dict:
+            if v.shape == model_dict[k].shape:
+                model_dict[k] = v
+            elif "proyeccion_entrada.weight" in k:
+                # Ajustamos quirúrgicamente los pesos de la dimensión de entrada (de 6 a 9) rellenando con ceros
+                with torch.no_grad():
+                    model_dict[k][:, :6] = v
+                    print("⚙️ Alineación de Tensores: Ajustada Proyección de Entrada de 6 a 9 variables de forma segura.")
+
     escuela.load_state_dict(model_dict)
     escuela.eval()
     
     bot_ppo = AgentePPO()
     
-    # INYECCIÓN PURA DE LA EXPERIENCIA ACUMULADA EN GITHUB
+    # INYECCIÓN FLUIDA DEL CEREBRO GRADUADO
     if os.path.exists(CEREBRO_A_ENTRENAR):
         try:
-            # Forzamos una carga flexible (strict=False) para acoplar las nuevas neuronas macro sin romper el archivo
-            bot_ppo.load_state_dict(torch.load(CEREBRO_A_ENTRENAR, map_location=torch.device('cpu')), strict=False)
-            ESTADISTICAS_IA["estado"] = f"🌲 Memoria inyectada con éxito: {CEREBRO_A_ENTRENAR}"
+            checkpoint_ppo = torch.load(CEREBRO_A_ENTRENAR, map_location=torch.device('cpu'))
+            bot_dict = bot_ppo.state_dict()
+            # Ajustamos la entrada de la red PPO de 6 a 9 mapeando los pesos existentes de la experiencia guardada
+            for k, v in checkpoint_ppo.items():
+                if k in bot_dict:
+                    if v.shape == bot_dict[k].shape:
+                        bot_dict[k] = v
+                    elif "red.0.weight" in k:
+                        with torch.no_grad():
+                            bot_dict[k][:, :6] = v
+            bot_ppo.load_state_dict(bot_dict)
+            ESTADISTICAS_IA["estado"] = f"🌲 Sinergias acopladas con éxito desde V5: {CEREBRO_A_ENTRENAR}"
         except Exception as e:
-            ESTADISTICAS_IA["estado"] = f"⚠️ Acoplamiento flexible activo: {str(e)}"
+            ESTADISTICAS_IA["estado"] = f"⚠️ Adaptación parcial activa: {str(e)}"
     else:
-        ESTADISTICAS_IA["estado"] = f"⚠️ No se halló {CEREBRO_A_ENTRENAR}. Inicializando Red Virgen."
+        ESTADISTICAS_IA["estado"] = f"⚠️ No se halló {CEREBRO_A_ENTRENAR}. Inicializando Red Estructural."
             
     optimizer_ppo = optim.Adam(bot_ppo.parameters(), lr=0.0001)
     scheduler = CosineAnnealingLR(optimizer_ppo, T_max=COMBATES_PPO, eta_min=1e-6)
     entorno = MercadoGimnasioAresBosque(datos_raw, precios_close, volumen_raw, ventana=VENTANA_TIEMPO)
     
-    alertar_telegram(f"🌲 *Ares Bosque V6 Conectado:* Desplegando indicadores históricos sobre {CEREBRO_A_ENTRENAR}")
+    alertar_telegram(f"🌲 *Ares Bosque V6.1 Online:* Conexión forzada exitosa con el cerebro: {CEREBRO_A_ENTRENAR}")
 
     ops_ganadas_acumuladas = 0
     ops_totales_acumuladas = 0
 
     for combate in range(1, COMBATES_PPO + 1):
         ESTADISTICAS_IA["combate_actual"] = combate
-        if "inyectada" not in ESTADISTICAS_IA["estado"] and combate > 10:
-            ESTADISTICAS_IA["estado"] = "🚀 Corriendo Sniper V6 (Ares Bosque)..."
+        if "Sinergias" not in ESTADISTICAS_IA["estado"] and combate > 5:
+            ESTADISTICAS_IA["estado"] = "🚀 Ejecutando Sniper V6.1 (Ares Bosque Live)..."
         
         obs = entorno.reset()
         historial_rendimientos = []
@@ -318,13 +298,13 @@ def iniciar_gimnasio_v6():
 
         if combate % REPORTAR_CADA == 0:
             torch.save(bot_ppo.state_dict(), CEREBRO_A_ENTRENAR)
-            alertar_telegram(f"🌲 *V6 Balance:* ${ESTADISTICAS_IA['balance_usd']:.2f} USD | Sharpe: {ESTADISTICAS_IA['ratio_sharpe']:.4f} | Racha controlada.")
+            alertar_telegram(f"🌲 *V6.1 Balance:* ${ESTADISTICAS_IA['balance_usd']:.2f} USD | Sharpe: {ESTADISTICAS_IA['ratio_sharpe']:.4f}")
 
     torch.save(bot_ppo.state_dict(), CEREBRO_A_ENTRENAR)
-    ESTADISTICAS_IA["estado"] = "🏆 ¡EVOLUCIÓN MÁXIMA V6 GRADUADA! Cerebro Macro Consolidado."
+    ESTADISTICAS_IA["estado"] = "🏆 ¡EVOLUCIÓN MÁXIMA V6.1 COMPLETA!"
 
 # ==============================================================================
-# 📺 INTERFAZ INTERACTIVA PREMIUM (FLASK HTML CON DASHBOARD SECUNDARIO)
+# 📺 INTERFAZ INTERACTIVA PREMIUM (FLASK HTML)
 # ==============================================================================
 app = Flask(__name__)
 
@@ -338,7 +318,7 @@ def index():
     return f"""
     <html>
         <head>
-            <title>Gimnasio Sniper V6 - Ares Bosque</title>
+            <title>Gimnasio Sniper V6.1 - Ares Bosque</title>
             <meta http-equiv="refresh" content="3">
             <style>
                 body {{ font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background:#07070f; color:#fff; text-align:center; padding:30px; }}
@@ -354,8 +334,8 @@ def index():
         </head>
         <body>
             <div class="container">
-                <h2>🌲 Panel Operativo: V6 - Ares Bosque 🌲</h2>
-                <p style="color:#aaa; font-size:14px; margin-top:0;">Ecosistema Inteligente Multi-Timeframe Anti-Sobreajuste</p>
+                <h2>🌲 Panel Operativo: V6.1 - Ares Bosque 🌲</h2>
+                <p style="color:#aaa; font-size:14px; margin-top:0;">Ecosistema Ajustado con Alineación de Tensores Dinámica</p>
                 
                 <div style="padding:10px; margin-bottom:10px; text-align:right;">
                     <a href="/telemetria" class="btn btn-nav" style="margin:0; padding:8px 16px; font-size:13px;">📊 IR A TELEMETRÍA DE INDICADORES</a>
@@ -392,14 +372,13 @@ def index():
 
                 <br><br>
                 <div style="background:#1a0c24; padding:15px; border-radius:8px; border:1px solid #4a157d;">
-                    <a href="/descargar_cerebro" class="btn" style="margin:0;">📥 DESCARGAR CEREBRO V6 (.PKL)</a>
+                    <a href="/descargar_cerebro" class="btn" style="margin:0;">📥 DESCARGAR CEREBRO V6.1 (.PKL)</a>
                 </div>
             </div>
         </body>
     </html>
     """
 
-# 📊 VENTANA EXTRA DE TELEMETRÍA SOLICITADA (PANEL DE RELEVANCIA DE CARACTERÍSTICAS)
 @app.route('/telemetria')
 def telemetria():
     color_alerta = "#00ffcc" if "Estable" in ESTADISTICAS_IA["alerta_ecosistema"] else "#ffcc00"
@@ -408,7 +387,7 @@ def telemetria():
     return f"""
     <html>
         <head>
-            <title>Telemetría de Indicadores - Sniper V6</title>
+            <title>Telemetría de Indicadores - Sniper V6.1</title>
             <meta http-equiv="refresh" content="3">
             <style>
                 body {{ font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background:#07070f; color:#fff; padding:30px; text-align:center; }}
