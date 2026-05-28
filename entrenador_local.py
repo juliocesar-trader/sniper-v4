@@ -12,10 +12,10 @@ import threading
 import requests
 
 # ==============================================================================
-# 🎯 CONTROL DE VERSIONES Y CONFIGURACIÓN CLOUD PERPETUA (V8.3 - CONCIENCIA LIMPIA)
+# 🎯 CONTROL DE VERSIONES Y CONFIGURACIÓN CLOUD PERPETUA (V8.4 - RESILIENTE TOTAL)
 # ==============================================================================
 RUTA_CSV = "BTCUSDT_1m_Ene_Abr_2026.csv"
-# ✨ NUEVO NOMBRE: Al no existir en Dropbox, obliga al bot a inicializar desde 0 absoluto.
+# ✨ NUEVA CONCIENCIA: Nombre limpio para empezar de cero absoluto y evitar colisiones
 CEREBRO_A_ENTRENAR = "modelo_ares_transformer_v8.pkl"
 
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
@@ -29,7 +29,7 @@ DBX_REFRESH_TOKEN = os.environ.get("DROPBOX_REFRESH_TOKEN")
 ESTADISTICAS_IA = {
     "combate_actual": 0,
     "total_combates": 4000,
-    "estado": "Inicializando Conciencia Limpia V8.3...",
+    "estado": "Inicializando Secuencia Limpia V8.4...",
     "retorno_ultimo_combate": 0.0,
     "ratio_sharpe": 0.0,
     "lr_actual": 0.0002, 
@@ -46,14 +46,16 @@ ESTADISTICAS_IA = {
     "peso_macro_acumulado": 33.4,
     "ops_consecutivas_direccion": 0,
     "ultima_direccion": 0,
-    "alerta_ecosistema": "Estable. Secuencia Evolutiva de Cero Activa.",
+    "alerta_ecosistema": "Estable. Aprendizaje Autónomo Activo.",
     "errores_indicador": "Ninguno"
 }
 
 VENTANA_TIEMPO = 60
 COMBATES_PPO = 4000
-REPORTAR_CADA = 100 
-PASOS_POR_COMBATE = 180
+# 📈 MEJORA: Guardado intermedio optimizado cada 50 combates
+REPORTAR_CADA = 50 
+# ⚡ VELOCIDAD V7: Volvemos a los 40 pasos para que el bucle vuele y Render no se cuelgue
+PASOS_POR_COMBATE = 40
 
 def alertar_telegram(mensaje):
     if bot_telegram and TELEGRAM_ID:
@@ -63,7 +65,7 @@ def alertar_telegram(mensaje):
             print(f"⚠️ Telegram Log: {e}")
 
 # ==============================================================================
-# 🛰️ SISTEMA CONECTOR REFRESH DE DROPBOX
+# 🛰️ SISTEMA CONECTOR REFRESH DE DROPBOX (LIGERO)
 # ==============================================================================
 def obtener_access_token():
     if not DBX_APP_KEY or not DBX_APP_SECRET or not DBX_REFRESH_TOKEN:
@@ -117,7 +119,7 @@ def subir_cerebro_cloud():
         print(f"❌ Error subiendo cerebro: {e}")
 
 # ==============================================================================
-# 🧠 ARQUITECTURA TRANSFORMER CON ESCUDO MATEMÁTICO (DROPOUT 40%)
+# 🧠 ARQUITECTURA TRANSFORMER (AUTÓNOMA - SIN INDICADORES DEPENDIENTES)
 # ==============================================================================
 class PositionalEncoding(nn.Module):
     def __init__(self, d_model=64, max_len=5000):
@@ -132,7 +134,7 @@ class PositionalEncoding(nn.Module):
         return x + self.pe[:, :x.size(1)]
 
 class AresActorCritico(nn.Module):
-    def __init__(self, num_caracteristicas=9, d_model=64, nhead=4, num_layers=3, dropout=0.40):
+    def __init__(self, num_caracteristicas=9, d_model=64, nhead=4, num_layers=3, dropout=0.30):
         super().__init__()
         self.proyeccion_entrada = nn.Linear(num_caracteristicas, d_model)
         self.pos_encoder = PositionalEncoding(d_model)
@@ -159,7 +161,7 @@ class AresActorCritico(nn.Module):
         return probs, valor
 
 # ==============================================================================
-# ⚡ ENTORNO QUANT CON ESCALADO EN VIVO Y COMISIONES REALISTAS
+# ⚡ ENFORZAMIENTO DE ENTORNO QUANT CON COMISIONES
 # ==============================================================================
 class MercadoGimnasioAresBosque:
     def __init__(self, datos_raw, precios_close, volumen_raw, ventana=60):
@@ -171,7 +173,7 @@ class MercadoGimnasioAresBosque:
         for i in range(6):
             self.matriz_extendida[:, i] = datos_raw[:, i]
             
-        print("⚡ Precalculando Ratios de Adaptabilidad Dinámica V8.3...")
+        print("⚡ Precalculando Ratios de Adaptabilidad Dinámica V8.4...")
         for i in range(30, len(precios_close)):
             retorno_5m = (precios_close[i] - precios_close[i-5]) / (precios_close[i-5] + 1e-8)
             retorno_15m = (precios_close[i] - precios_close[i-15]) / (precios_close[i-15] + 1e-8)
@@ -256,11 +258,11 @@ class MercadoGimnasioAresBosque:
         ESTADISTICAS_IA["peso_macro_acumulado"] = (ESTADISTICAS_IA["peso_macro_acumulado"] * 0.95) + (peso_instantaneo_mac * 0.05)
 
         self.paso_actual += 1
-        terminado = (self.conteo_esperas_seguidas > 50)
+        terminado = (self.conteo_esperas_seguidas > 35)
         return self.obtener_observacion_normalizada(), recompensa, rendimiento_neto, terminado
 
 # ==============================================================================
-# 🏋️ BUCLE PPO PERPETUO
+# 🏋️ BUCLE PPO RESILIENTE DE ALTA VELOCIDAD
 # ==============================================================================
 def iniciar_gimnasio_v8():
     global ESTADISTICAS_IA
@@ -270,7 +272,8 @@ def iniciar_gimnasio_v8():
         return
 
     try:
-        df = pd.read_csv(RUTA_CSV, header=None, skiprows=1, nrows=15000, usecols=[1, 2, 3, 4, 5], low_memory=False)
+        # Carga optimizada de filas estilo V7 para no colapsar la RAM del servidor
+        df = pd.read_csv(RUTA_CSV, header=None, skiprows=1, nrows=35000, usecols=[1, 2, 3, 4, 5], low_memory=False)
         datos_raw = np.zeros((len(df), 6), dtype=np.float32)
         datos_raw[:, :5] = df[[1, 2, 3, 4, 5]].values
         datos_raw[:, 5] = df[4].values 
@@ -283,40 +286,29 @@ def iniciar_gimnasio_v8():
 
     descargar_cerebro_cloud()
     modelo_ares = AresActorCritico()
-    optimizer = optim.Adam(modelo_ares.parameters(), lr=0.0002)
-    scheduler = CosineAnnealingLR(optimizer, T_max=COMBATES_PPO, eta_min=1e-6)
     
-    combate_inicial = 1
-
+    # ✨ RE-INYECCIÓN FLEXIBLE DE CONCIENCIA ESTILO V7.0
     if os.path.exists(CEREBRO_A_ENTRENAR):
         try:
             checkpoint = torch.load(CEREBRO_A_ENTRENAR, map_location=torch.device('cpu'), weights_only=False)
-            if isinstance(checkpoint, dict) and "state_dict" in checkpoint:
-                # 🛡️ PROTECCIÓN ANTI-FALLOS FUTUROS: strict=False permite alterar el modelo sin generar caídas.
-                modelo_ares.load_state_dict(checkpoint["state_dict"], strict=False)
-                try:
-                    optimizer.load_state_dict(checkpoint["optimizer_state"])
-                    scheduler.load_state_dict(checkpoint["scheduler_state"])
-                except:
-                    print("⚠️ Optimizador recreado por cambio estructural.")
-                combate_inicial = checkpoint.get("combate", 1) + 1
-                ESTADISTICAS_IA = checkpoint.get("estadisticas", ESTADISTICAS_IA)
-                ESTADISTICAS_IA["estado"] = f"🌲 Evolución Reanudada con Éxito. Combate: {combate_inicial}"
-            else:
-                modelo_ares.load_state_dict(checkpoint, strict=False)
-                ESTADISTICAS_IA["estado"] = "⚡ Pesos simples conectados sin forzar coincidencia estricta."
+            # El uso de strict=False garantiza que si cambias el código en el futuro, cargará igual sin trabarse
+            modelo_ares.load_state_dict(checkpoint, strict=False)
+            ESTADISTICAS_IA["estado"] = "⚡ Conciencia Adaptable Sincronizada desde Dropbox."
         except Exception as e:
-            ESTADISTICAS_IA["estado"] = f"⚠️ Modo Resiliencia: Cargado con adaptaciones estructurales: {str(e)}"
+            ESTADISTICAS_IA["estado"] = f"⚠️ Modo Adaptativo Activado: {str(e)}"
     else:
-        ESTADISTICAS_IA["estado"] = "✨ Conciencia Limpia Inicializada. Aprendiendo desde 0 absoluto."
+        ESTADISTICAS_IA["estado"] = "✨ Nueva Conciencia Inicializada desde 0 Absoluto."
             
+    optimizer = optim.Adam(modelo_ares.parameters(), lr=0.0002)
+    scheduler = CosineAnnealingLR(optimizer, T_max=COMBATES_PPO, eta_min=1e-6)
     entorno = MercadoGimnasioAresBosque(datos_raw, precios_close, volumen_raw, ventana=VENTANA_TIEMPO)
-    alertar_telegram(f"⚡ *Ares Limpio V8.3:* Iniciando entrenamiento puro desde el combate {combate_inicial}.")
+    
+    alertar_telegram("⚡ *Ares V8.4:* Secuencia de evolución autónoma en marcha.")
 
     ops_ganadas = 0
     ops_totales = 0
 
-    for combate in range(combate_inicial, COMBATES_PPO + 1):
+    for combate in range(1, COMBATES_PPO + 1):
         ESTADISTICAS_IA["combate_actual"] = combate
         obs = entorno.reset()
         
@@ -400,31 +392,18 @@ def iniciar_gimnasio_v8():
         if ops_totales > 0:
             ESTADISTICAS_IA["efectividad_estimada"] = float(ops_ganadas / ops_totales * 100)
 
+        # 🔄 GUARDADO RÁPIDO ESTILO V7: Guarda solo pesos de neuronas cada 50 combates. ¡Cero bloqueos!
         if combate % REPORTAR_CADA == 0:
-            checkpoint_perpetuo = {
-                "state_dict": modelo_ares.state_dict(),
-                "optimizer_state": optimizer.state_dict(),
-                "scheduler_state": scheduler.state_dict(),
-                "combate": combate,
-                "estadisticas": ESTADISTICAS_IA
-            }
-            torch.save(checkpoint_perpetuo, CEREBRO_A_ENTRENAR)
+            torch.save(modelo_ares.state_dict(), CEREBRO_A_ENTRENAR)
             subir_cerebro_cloud()
-            alertar_telegram(f"🌲 *Ares V8 Cloud:* [{combate}/{COMBATES_PPO}] | Wallet: ${ESTADISTICAS_IA['balance_usd']:.2f} | Sharpe: {ESTADISTICAS_IA['ratio_sharpe']:.4f}")
+            alertar_telegram(f"🌲 *Ares V8.4 Cloud:* [{combate}/{COMBATES_PPO}] | Wallet: ${ESTADISTICAS_IA['balance_usd']:.2f} | Sharpe: {ESTADISTICAS_IA['ratio_sharpe']:.4f}")
 
-    checkpoint_perpetuo = {
-        "state_dict": modelo_ares.state_dict(),
-        "optimizer_state": optimizer.state_dict(),
-        "scheduler_state": scheduler.state_dict(),
-        "combate": COMBATES_PPO,
-        "estadisticas": ESTADISTICAS_IA
-    }
-    torch.save(checkpoint_perpetuo, CEREBRO_A_ENTRENAR)
+    torch.save(modelo_ares.state_dict(), CEREBRO_A_ENTRENAR)
     subir_cerebro_cloud()
     ESTADISTICAS_IA["estado"] = "🏆 ¡EVOLUCIÓN PERPETUA COMPLETADA CON ÉXITO!"
 
 # ==============================================================================
-# INTERFAZ WEB
+# INTERFAZ WEB (SIEMPRE ACTIVA)
 # ==============================================================================
 app = Flask(__name__)
 
@@ -438,7 +417,7 @@ def index():
     return f"""
     <html>
         <head>
-            <title>Gimnasio Ares Perpetuo V8.3</title>
+            <title>Gimnasio Ares Perpetuo V8.4</title>
             <meta http-equiv="refresh" content="3">
             <style>
                 body {{ font-family: 'Segoe UI', sans-serif; background:#04040a; color:#fff; text-align:center; padding:30px; }}
@@ -451,8 +430,8 @@ def index():
         </head>
         <body>
             <div class="container">
-                <h2>⚡ Panel Perpetuo: Ares Caos V8.3 ⚡</h2>
-                <p style="color:#888; font-size:14px; margin-top:0;">Evolución de Cero con Inyección Tolerante de Checkpoints</p>
+                <h2>⚡ Panel de Control: Ares Caos V8.4 ⚡</h2>
+                <p style="color:#888; font-size:14px; margin-top:0;">Evolución de Cero con Inyección de Conciencia Ligera</p>
                 
                 <div style="padding:10px; margin-bottom:10px; text-align:right;">
                     <a href="/telemetria" class="btn">📊 VER DISTRIBUCIÓN DE ATENCIÓN</a>
